@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Roof Mockup Studio</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<style>
+  :root{--ink:#1f1d1a;--muted:#6b665e;--accent:#c4521f;--line:#ddd8cf}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--ink);background:#f6f4f0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+  main{max-width:860px;width:100%}
+  h1{font-size:34px;margin:0 0 6px}
+  p.lead{color:var(--muted);margin:0 0 28px;font-size:17px}
+  .cards{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  a.card{display:block;text-decoration:none;color:inherit;background:#fff;border:2px solid var(--line);border-radius:16px;padding:24px;transition:border-color .15s}
+  a.card:hover,a.card:focus{border-color:var(--accent);outline:none}
+  .card h2{margin:0 0 8px;font-size:22px}
+  .card p{margin:0;color:var(--muted);line-height:1.45}
+  .card .go{display:inline-block;margin-top:16px;background:var(--ink);color:#fff;padding:10px 16px;border-radius:10px;font-weight:600}
+  .card.team .go{background:var(--accent)}
+  footer{margin-top:28px;color:var(--muted);font-size:13px}
+  @media (max-width:640px){.cards{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<main>
+  <h1>Roof Mockup Studio</h1>
+  <p class="lead">Design your roof mockup board by board, check it, then build it from your cut list.</p>
+  <div class="cards">
+    <a class="card" href="studio.html">
+      <h2>One tablet per team</h2>
+      <p>Your whole team works on one iPad. The design is saved on that iPad.</p>
+      <span class="go">Open Roof Mockup Studio</span>
+    </a>
+    <a class="card team" href="team.html">
+      <h2>Team app</h2>
+      <p>Pick one tablet for the team, or team sync: everyone works on the same build at the same time from their own iPad.</p>
+      <span class="go">Open Roof Mockup Studio Team</span>
+    </a>
+  </div>
+  <footer>California JATC · Central Valley · Plan and Design</footer>
+</main>
+</body>
+</html>
