@@ -1247,6 +1247,7 @@ function renderTeacher(){const b=document.getElementById('tBody');
     <p class="hint">When allowed, a selected piece shows Copy buttons (beside it, or 12″, 16″ or 24″ on center). This setting stays on this iPad.</p>
     <div class="subhead">Mirror in Build mode</div><div class="btnrow"><button type="button" class="btn ${TEACH.allowMirror?'':'light'}" data-t="mirOn">Allow mirror</button><button type="button" class="btn ${TEACH.allowMirror?'light':''}" data-t="mirOff">No mirror</button></div>
     <p class="hint">When allowed, a selected piece or detail shows Mirror buttons, and the left panel can mirror the whole build to the other side of the Z wall. This setting stays on this iPad.</p>
+    <p class="hint"><b>App version: Nov 16, 2026 · 3:00 PM</b> (sheets cut to the Z wall and follow tapered or sloped boards)</p>
     <div class="subhead">Groups</div><div class="btnrow">${[3,4,5,6].map(n=>`<button type="button" class="btn ${TEACH.groups===n?'':'light'}" data-t="groups" data-n="${n}">${n} groups</button>`).join('')}</div>
     <div class="btnrow"><button type="button" class="btn light" data-t="group">Change this iPad's group</button></div>
     ${HOOKS.teacherExtra?HOOKS.teacherExtra():''}
@@ -1883,15 +1884,18 @@ function setTaperSlope(p,dir){const hi=Math.max(p.taper.h0,p.taper.h1);const cur
   if(p.taper.h0>=p.taper.h1){p.taper.h0=hi;p.taper.h1=lo;}else{p.taper.h1=hi;p.taper.h0=lo;}return true;}
 // a flat sheet dropped on tapered (ripped) boards tilts to their slope by itself; returns a message or ''
 function autoSlope(p){if(p.k!=='sh'||p.lay==='up')return '';const d=BUI.d;if(p.tilt&&p.tilt.p)return '';const bb=pBox(p);
-  const under=d.pieces.filter(q=>q!==p&&q.k==='lum'&&q.lay==='edge'&&q.cut==='taper'&&q.taper&&Math.abs(q.taper.h0-q.taper.h1)>0.01&&overlapBox(bb,pBox(q))&&samplePts(q,1).some(([x,y])=>pInside(p,x,y,0.1)));
+  const tap=q=>q.k==='lum'&&q.lay==='edge'&&q.cut==='taper'&&q.taper&&Math.abs(q.taper.h0-q.taper.h1)>0.01,til=q=>q.k==='lum'&&q.lay!=='up'&&lumTilt(q)>0.01;
+  const under=d.pieces.filter(q=>q!==p&&(tap(q)||til(q))&&overlapBox(bb,pBox(q))&&samplePts(q,1).some(([x,y])=>pInside(p,x,y,0.1)));
   if(!under.length)return '';
-  const dirs=under.map(q=>{const [qx,qy]=pAx(q);const s=(q.taper.h0-q.taper.h1)/q.len;return {x:qx*Math.sign(s),y:qy*Math.sign(s),pitch:Math.abs(s)*12};});
+  const dirs=under.map(q=>{const [qx,qy]=pAx(q);if(tap(q)){const s=(q.taper.h0-q.taper.h1)/q.len;return {x:qx*Math.sign(s),y:qy*Math.sign(s),pitch:Math.abs(s)*12};}
+    const sg=(q.tilt.low==='u+')?1:-1;return {x:qx*sg,y:qy*sg,pitch:lumTilt(q)};});
   const a=dirs[0];if(!dirs.every(o=>o.x*a.x+o.y*a.y>0.985&&Math.abs(o.pitch-a.pitch)<0.2))return 'mixed';
   const [ux,uy]=pAx(p);const du=a.x*ux+a.y*uy,dv=-a.x*uy+a.y*ux;if(Math.max(Math.abs(du),Math.abs(dv))<0.985)return 'angle';const low=Math.abs(du)>=Math.abs(dv)?(du>0?'u+':'u-'):(dv>0?'v+':'v-');
   const near=SLOPES.reduce((m,b)=>Math.abs(b-a.pitch)<Math.abs(m-a.pitch)?b:m);
   p.tilt={p:Math.abs(near-a.pitch)<0.02?near:Math.round(a.pitch*100)/100,low};p.hold=false;
   return `tilted to ${pitchTxt(p.tilt.p)}, low side to the ${SIDE_NAMES[sideWorld(p,low)]}, to follow the tapered boards under it`;}
-function fitSheet(p){if(!p||p.k!=='sh'||p.lay==='up')return '';const c=autoNotch(p)>0,t=autoSlope(p);const m=[];if(c)m.push('cut to fit around the wall');if(t&&t!=='mixed'&&t!=='angle')m.push(t);
+function refitOver(q){if(!q||q.k!=='lum')return '';const d=BUI.d,bb=pBox(q);let m='';d.pieces.filter(s=>s.k==='sh'&&s.lay!=='up'&&!(s.tilt&&s.tilt.p)&&overlapBox(pBox(s),bb)).forEach(s=>{const t=autoSlope(s);if(t&&t!=='mixed'&&t!=='angle')m='Sheet '+t+'.';});return m;}
+function fitSheet(p){if(p&&p.k==='lum')return refitOver(p);if(!p||p.k!=='sh'||p.lay==='up')return '';const c=autoNotch(p)>0,t=autoSlope(p);const m=[];if(c)m.push('cut to fit around the wall');if(t&&t!=='mixed'&&t!=='angle')m.push(t);
   let msg=m.length?'Sheet '+m.join(' and ')+'.':'';if(t==='mixed')msg+=(msg?' ':'')+'The boards under this sheet slope different ways, so it stays flat. Cut it smaller so it sits on boards that slope the same way.';if(t==='angle')msg+=(msg?' ':'')+'The tapered boards run at an angle to this sheet, so it stays flat. Turn the sheet to line up with the boards and drop it again.';return msg;}
 function matchSlope(p){const d=BUI.d;const bb=pBox(p);const under=d.pieces.filter(q=>q!==p&&q.k==='lum'&&q.lay==='edge'&&q.cut==='taper'&&q.taper&&Math.abs(q.taper.h0-q.taper.h1)>0.01&&overlapBox(bb,pBox(q)));
   if(!under.length){toast('No tapered boards under this sheet. Cut a taper on the boards first.');return;}
@@ -1975,7 +1979,7 @@ function bOnControl(e){const b=e.target.closest('button');if(!b)return;const d=B
     if(a==='cutfit'){p.noCut=false;const r=autoNotch(p);bcommit(true);toast(p.notch&&p.notch.length?'Cut to fit around the wall.':'No wall under this sheet to cut around.');return;}
     if(a==='mirror'){if(!TEACH.allowMirror)return;mirrorSel(b.dataset.m);return;}
     if(a==='flip'){const t=p.taper.h0;p.taper.h0=p.taper.h1;p.taper.h1=t;bcommit(true);return;}
-    if(a==='slope'){if(setTaperSlope(p,+b.dataset.dir))bcommit(true);return;}
+    if(a==='slope'){if(setTaperSlope(p,+b.dataset.dir)){const fm=refitOver(p);bcommit(true);if(fm)toast(fm);}return;}
     if(a==='match'){matchSlope(p);return;}
     return;}
   if(!b.dataset.obj)return;const obj=b.dataset.obj,t=target(obj);if(!t)return;
@@ -1987,6 +1991,7 @@ function bOnControl(e){const b=e.target.closest('button');if(!b)return;const d=B
 function afterSet(obj,t,k){if(obj!=='p')return;const p=t;
   if(k==='z')p.hold=true;
   if(p.k==='sh'&&['x','y','w','l','lay'].includes(k)){if(p.lay==='up')p.notch=[];else{const fm=fitSheet(p);if(fm)setTimeout(()=>toast(fm),0);}}
+  if(p.k==='lum'&&['x','y','cut','tilt.p','tilt.low','len'].includes(k)){const fm=refitOver(p);if(fm)setTimeout(()=>toast(fm),0);}
   if(p.k==='lum'){const dd=LUMBER[p.mat].d;
     if(k==='cut'){if(p.cut==='rip')p.taper={h0:Math.min(dd,p.taper?Math.max(p.taper.h0,p.taper.h1):dd),h1:0};if(p.cut==='taper'){p.taper={h0:dd,h1:dd};setTaperSlope(p,1);}if(p.cut==='full')p.taper=null;}
     if(p.cut==='rip'&&p.taper)p.taper.h1=p.taper.h0;
