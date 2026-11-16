@@ -1887,12 +1887,12 @@ function autoSlope(p){if(p.k!=='sh'||p.lay==='up')return '';const d=BUI.d;if(p.t
   if(!under.length)return '';
   const dirs=under.map(q=>{const [qx,qy]=pAx(q);const s=(q.taper.h0-q.taper.h1)/q.len;return {x:qx*Math.sign(s),y:qy*Math.sign(s),pitch:Math.abs(s)*12};});
   const a=dirs[0];if(!dirs.every(o=>o.x*a.x+o.y*a.y>0.985&&Math.abs(o.pitch-a.pitch)<0.2))return 'mixed';
-  const [ux,uy]=pAx(p);const du=a.x*ux+a.y*uy,dv=-a.x*uy+a.y*ux;const low=Math.abs(du)>=Math.abs(dv)?(du>0?'u+':'u-'):(dv>0?'v+':'v-');
+  const [ux,uy]=pAx(p);const du=a.x*ux+a.y*uy,dv=-a.x*uy+a.y*ux;if(Math.max(Math.abs(du),Math.abs(dv))<0.985)return 'angle';const low=Math.abs(du)>=Math.abs(dv)?(du>0?'u+':'u-'):(dv>0?'v+':'v-');
   const near=SLOPES.reduce((m,b)=>Math.abs(b-a.pitch)<Math.abs(m-a.pitch)?b:m);
   p.tilt={p:Math.abs(near-a.pitch)<0.02?near:Math.round(a.pitch*100)/100,low};p.hold=false;
   return `tilted to ${pitchTxt(p.tilt.p)}, low side to the ${SIDE_NAMES[sideWorld(p,low)]}, to follow the tapered boards under it`;}
-function fitSheet(p){if(!p||p.k!=='sh'||p.lay==='up')return '';const c=autoNotch(p)>0,t=autoSlope(p);const m=[];if(c)m.push('cut to fit around the wall');if(t&&t!=='mixed')m.push(t);
-  let msg=m.length?'Sheet '+m.join(' and ')+'.':'';if(t==='mixed')msg+=(msg?' ':'')+'The boards under this sheet slope different ways, so it stays flat. Cut it smaller so it sits on boards that slope the same way.';return msg;}
+function fitSheet(p){if(!p||p.k!=='sh'||p.lay==='up')return '';const c=autoNotch(p)>0,t=autoSlope(p);const m=[];if(c)m.push('cut to fit around the wall');if(t&&t!=='mixed'&&t!=='angle')m.push(t);
+  let msg=m.length?'Sheet '+m.join(' and ')+'.':'';if(t==='mixed')msg+=(msg?' ':'')+'The boards under this sheet slope different ways, so it stays flat. Cut it smaller so it sits on boards that slope the same way.';if(t==='angle')msg+=(msg?' ':'')+'The tapered boards run at an angle to this sheet, so it stays flat. Turn the sheet to line up with the boards and drop it again.';return msg;}
 function matchSlope(p){const d=BUI.d;const bb=pBox(p);const under=d.pieces.filter(q=>q!==p&&q.k==='lum'&&q.lay==='edge'&&q.cut==='taper'&&q.taper&&Math.abs(q.taper.h0-q.taper.h1)>0.01&&overlapBox(bb,pBox(q)));
   if(!under.length){toast('No tapered boards under this sheet. Cut a taper on the boards first.');return;}
   const q=under[0];const [qx,qy]=pAx(q);const s=(q.taper.h0-q.taper.h1)/q.len; // height drops along +u of q when s>0
