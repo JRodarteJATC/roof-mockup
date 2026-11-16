@@ -1233,7 +1233,7 @@ function constructionSteps(d,M){
 
 // ================= Instructor menu (hidden) and groups =================
 const TSTORE='roof-studio-teacher',GSTORE='roof-studio-group';
-const TEACH=Object.assign({pin:'27112908',allowCopy:false,groups:6},(()=>{try{return JSON.parse(localStorage.getItem(TSTORE)||'{}');}catch(e){return {};}})());
+const TEACH=Object.assign({pin:'27112908',allowCopy:true,groups:6},(()=>{try{return JSON.parse(localStorage.getItem(TSTORE)||'{}');}catch(e){return {};}})());if(!TEACH.copyDefault2){TEACH.allowCopy=true;TEACH.copyDefault2=1;try{localStorage.setItem(TSTORE,JSON.stringify(TEACH));}catch(e){}}
 function tSave(){try{localStorage.setItem(TSTORE,JSON.stringify(TEACH));}catch(e){}}
 const GROUP=Object.assign({g:0,names:['','','','']},(()=>{try{return JSON.parse(localStorage.getItem(GSTORE)||'{}');}catch(e){return {};}})());
 function gSave(){try{localStorage.setItem(GSTORE,JSON.stringify(GROUP));}catch(e){}}
