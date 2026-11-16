@@ -1606,7 +1606,7 @@ function bind3d(){
     if(pts.size===2){const [a,b]=[...pts.values()];const dd=Math.hypot(a.x-b.x,a.y-b.y);if(pinch){V3.dist=clamp(V3.dist*pinch/dd,30,600);V3.dirty=true;}pinch=dd;return;}
     if(last){V3.az-=(e.clientX-last.x)*0.008;V3.el=clamp(V3.el+(e.clientY-last.y)*0.006,0.05,1.55);last={x:e.clientX,y:e.clientY};V3.dirty=true;}};
   const up=e=>{pts.delete(e.pointerId);if(pts.size<2)pinch=null;if(!pts.size){last=null;
-      if(MODE==='build'){if(V3.drag){const dg=V3.drag;V3.drag=null;if(dg.type==='piece')afterMove(dg.obj,dg.before);bcommit(true);return;}if(tap&&e.type==='pointerup'){const dg=b3down(e,pick(e));BUI.sel=dg?{type:dg.type,id:dg.obj.id}:null;bRenderInspector();bListRefresh();bv3build();}tap=null;return;}
+      if(MODE==='build'){if(V3.drag){const dg=V3.drag;V3.drag=null;if(dg.type==='piece'){const r=autoNotch(dg.obj);afterMove(dg.obj,dg.before);if(r>0)toast('Sheet cut to fit around the wall.');}bcommit(true);return;}if(tap&&e.type==='pointerup'){const dg=b3down(e,pick(e));BUI.sel=dg?{type:dg.type,id:dg.obj.id}:null;bRenderInspector();bListRefresh();bv3build();}tap=null;return;}
       if(V3.drag){V3.drag=null;commit(true);}}};
   el.onpointerup=up;el.onpointercancel=up;
   el.onwheel=e=>{e.preventDefault();V3.dist=clamp(V3.dist*(1+Math.sign(e.deltaY)*0.08),30,600);V3.dirty=true;};
@@ -1676,10 +1676,59 @@ function botL(p,u,v){return p.z+gOff(p,u,v);}
 function pCorners(p){const D=pDims(p);return [[-D.a,-D.b],[D.a,-D.b],[D.a,D.b],[-D.a,D.b]];}
 function pFoot(p){return pCorners(p).map(([u,v])=>toWorld(p,u,v));}
 function pBox(p){return bounds(pFoot(p));}
-function pInside(p,x,y,sh){const [u,v]=toLocal(p,x,y),D=pDims(p);sh=sh||0;return Math.abs(u)<=D.a-sh&&Math.abs(v)<=D.b-sh;}
+function pInside(p,x,y,sh){const [u,v]=toLocal(p,x,y),D=pDims(p);sh=sh||0;if(!(Math.abs(u)<=D.a-sh&&Math.abs(v)<=D.b-sh))return false;return !inNotchL(p,u,v,sh);}
+function inNotchL(p,u,v,sh){const N=p.k==='sh'&&p.lay!=='up'&&p.notch;if(!N||!N.length)return false;sh=sh||0;return N.some(n=>u>n[0]+sh&&u<n[2]-sh&&v>n[1]+sh&&v<n[3]-sh);}
+function shGrid(p){const D=pDims(p),N=(p.notch||[]).map(n=>[clamp(n[0],-D.a,D.a),clamp(n[1],-D.b,D.b),clamp(n[2],-D.a,D.a),clamp(n[3],-D.b,D.b)]);
+  const uq=a=>[...new Set(a.map(x=>Math.round(x*1000)/1000))].sort((x,y)=>x-y);const us=uq([-D.a,D.a].concat(...N.map(n=>[n[0],n[2]]))),vs=uq([-D.b,D.b].concat(...N.map(n=>[n[1],n[3]])));
+  const fill=(i,j)=>{if(i<0||j<0||i>=us.length-1||j>=vs.length-1)return false;const cu=(us[i]+us[i+1])/2,cv=(vs[j]+vs[j+1])/2;return !N.some(n=>cu>n[0]&&cu<n[2]&&cv>n[1]&&cv<n[3]);};return {us,vs,fill};}
+function shRuns(p){const {us,vs,fill}=shGrid(p),R=[];for(let j=0;j<vs.length-1;j++){let i=0;while(i<us.length-1){if(!fill(i,j)){i++;continue;}let k=i;while(k<us.length-1&&fill(k,j))k++;R.push([us[i],vs[j],us[k],vs[j+1]]);i=k;}}return R;}
+function shEdges(p){const {us,vs,fill}=shGrid(p),E=[];for(let i=0;i<us.length-1;i++)for(let j=0;j<vs.length-1;j++){if(!fill(i,j))continue;
+  if(!fill(i,j-1))E.push([us[i],vs[j],us[i+1],vs[j]]);if(!fill(i,j+1))E.push([us[i],vs[j+1],us[i+1],vs[j+1]]);if(!fill(i-1,j))E.push([us[i],vs[j],us[i],vs[j+1]]);if(!fill(i+1,j))E.push([us[i+1],vs[j],us[i+1],vs[j+1]]);}return E;}
+function runPiece(p,r){const [cx,cy]=toWorld(p,(r[0]+r[2])/2,(r[1]+r[3])/2);return Object.assign({},p,{x:cx,y:cy,l:r[2]-r[0],w:r[3]-r[1],notch:null});}
+function notchTxt(p){const N=p.notch;if(!N||!N.length)return '';const D=pDims(p);return N.map(n=>{const a=r8(n[2]-n[0]),b=r8(n[3]-n[1]);const e=[n[0]<=-D.a+0.2,n[2]>=D.a-0.2,n[1]<=-D.b+0.2,n[3]>=D.b-0.2].filter(Boolean).length;
+  return `${frac(b)} × ${frac(a)} ${e>=3?'strip':e===2?'corner notch':e===1?'notch from the edge':'hole'}`;}).join(', ');}
+// cut a flat sheet around standing walls (Z wall studs, sheathing and their plates) under its footprint
+function autoNotch(p){if(p.k!=='sh'||p.lay==='up'||p.noCut)return 0;const d=BUI.d;const D0=pDims(p),bb=pBox(p);
+  const others=d.pieces.filter(q=>q!==p&&overlapBox(bb,pBox(q)));
+  // only cut when a standing wall piece actually runs into the sheet as it is now
+  const deep=(x,y)=>{const [u,v]=toLocal(p,x,y);return Math.abs(u)<=D0.a-0.25&&Math.abs(v)<=D0.b-0.25&&!inNotchL(p,u,v,-0.25);};
+  if(!others.some(q=>q.lay==='up'&&pFoot(q).concat(samplePts(q,1)).some(([x,y])=>deep(x,y))))return 0;
+  const before=JSON.stringify(p.notch||[]);p.notch=[];const D=pDims(p);const hitsRect=q=>pFoot(q).concat(samplePts(q,2)).some(([x,y])=>{const [u,v]=toLocal(p,x,y);return Math.abs(u)<D.a-0.1&&Math.abs(v)<D.b-0.1;});
+  const U=others.filter(q=>q.lay==='up'&&hitsRect(q));if(!U.length){p.notch=[];return JSON.stringify(p.notch)!==before?-1:0;}
+  const zone=U.map(q=>{const b=pBox(q);return {x0:b.x0-0.8,y0:b.y0-0.8,x1:b.x1+0.8,y1:b.y1+0.8};});
+  const inZone=q=>{const b=pBox(q),A=(b.x1-b.x0)*(b.y1-b.y0)||1;let cov=0;samplePts(q,1).forEach(([x,y])=>{if(zone.some(z=>x>=z.x0&&x<=z.x1&&y>=z.y0&&y<=z.y1))cov++;});return cov/samplePts(q,1).length>=0.7;};
+  const Z=others.filter(q=>q.lay!=='up'&&inZone(q));
+  const z0=p.z;p.z=0;const zp=restZ(p,others.filter(q=>!U.includes(q)&&!Z.includes(q)));p.z=z0;const t=D.t||0.5;
+  const O=U.filter(q=>q.z<zp+t+0.25);if(!O.length){return 0;}
+  const Ob=O.map(q=>pBox(q));const Zc=Z.filter(q=>{const b=pBox(q);return Ob.some(o=>b.x0<o.x1+0.8&&b.x1>o.x0-0.8&&b.y0<o.y1+0.8&&b.y1>o.y0-0.8);});
+  const N=[];O.concat(Zc).forEach(q=>{const loc=pFoot(q).map(([x,y])=>toLocal(p,x,y));let u0=Math.min(...loc.map(l=>l[0]))-0.125,u1=Math.max(...loc.map(l=>l[0]))+0.125,v0=Math.min(...loc.map(l=>l[1]))-0.125,v1=Math.max(...loc.map(l=>l[1]))+0.125;
+    u0=Math.max(u0,-D.a);u1=Math.min(u1,D.a);v0=Math.max(v0,-D.b);v1=Math.min(v1,D.b);if(u1-u0<0.25||v1-v0<0.25)return;
+    if(u0<-D.a+0.75)u0=-D.a;if(u1>D.a-0.75)u1=D.a;if(v0<-D.b+0.75)v0=-D.b;if(v1>D.b-0.75)v1=D.b;N.push([r8(u0),r8(v0),r8(u1),r8(v1)]);});
+  if(!N.length)return 0;
+  // the wall splits the sheet: keep the biggest side, cut the sheet to the wall's shape
+  const uq=v=>[...new Set(v.map(x=>Math.round(x*1000)/1000))].sort((x,y)=>x-y);
+  const us=uq([-D.a,D.a].concat(...N.map(n=>[n[0],n[2]]))),vs=uq([-D.b,D.b].concat(...N.map(n=>[n[1],n[3]])));const nu=us.length-1,nv=vs.length-1;
+  const blocked=(i,j)=>{const cu=(us[i]+us[i+1])/2,cv=(vs[j]+vs[j+1])/2;return N.some(n=>cu>n[0]&&cu<n[2]&&cv>n[1]&&cv<n[3]);};
+  const comp=[];for(let i=0;i<nu;i++){comp.push(new Array(nv).fill(-1));}let nc=0;const area=[];
+  for(let i=0;i<nu;i++)for(let j=0;j<nv;j++){if(blocked(i,j)||comp[i][j]>=0)continue;let A=0;const st=[[i,j]];comp[i][j]=nc;
+    while(st.length){const [x,y]=st.pop();A+=(us[x+1]-us[x])*(vs[y+1]-vs[y]);[[1,0],[-1,0],[0,1],[0,-1]].forEach(([dx,dy])=>{const X=x+dx,Y=y+dy;if(X<0||Y<0||X>=nu||Y>=nv||comp[X][Y]>=0||blocked(X,Y))return;comp[X][Y]=nc;st.push([X,Y]);});}
+    area.push(A);nc++;}
+  if(!nc)return 0;const keep=area.indexOf(Math.max(...area));const kept=(i,j)=>comp[i][j]===keep;
+  let ku0=1e9,ku1=-1e9,kv0=1e9,kv1=-1e9;for(let i=0;i<nu;i++)for(let j=0;j<nv;j++)if(kept(i,j)){ku0=Math.min(ku0,us[i]);ku1=Math.max(ku1,us[i+1]);kv0=Math.min(kv0,vs[j]);kv1=Math.max(kv1,vs[j+1]);}
+  if(ku1-ku0<1||kv1-kv0<1)return 0;
+  // removed cells inside the kept outline become notches, as row runs merged down the columns
+  const R=[];for(let j=0;j<nv;j++){if(vs[j]<kv0-1e-6||vs[j+1]>kv1+1e-6)continue;let i=0;while(i<nu){if(us[i]<ku0-1e-6||us[i+1]>ku1+1e-6||kept(i,j)){i++;continue;}let k=i;while(k<nu&&us[k+1]<=ku1+1e-6&&!kept(k,j))k++;R.push([us[i],vs[j],us[k],vs[j+1]]);i=k;}}
+  let ch=true;while(ch){ch=false;for(let x=0;x<R.length&&!ch;x++)for(let y=0;y<R.length&&!ch;y++){if(x===y)continue;const a=R[x],c=R[y];if(Math.abs(a[0]-c[0])<1e-6&&Math.abs(a[2]-c[2])<1e-6&&Math.abs(a[3]-c[1])<1e-6){R[x]=[a[0],a[1],a[2],c[3]];R.splice(y,1);ch=true;}}}
+  // fold thin slivers (left by wall thickness and padding) into the notch beside them
+  ch=true;while(ch){ch=false;for(let x=0;x<R.length&&!ch;x++)for(let y=x+1;y<R.length&&!ch;y++){const a=R[x],c=R[y];const touch=a[0]<=c[2]+1e-6&&c[0]<=a[2]+1e-6&&a[1]<=c[3]+1e-6&&c[1]<=a[3]+1e-6;if(!touch)continue;
+    const m=[Math.min(a[0],c[0]),Math.min(a[1],c[1]),Math.max(a[2],c[2]),Math.max(a[3],c[3])],ar=r=>(r[2]-r[0])*(r[3]-r[1]);if(ar(m)-ar(a)-ar(c)<1.01){R[x]=m;R.splice(y,1);ch=true;}}}
+  // shrink the sheet to the kept outline and re-center it
+  const cu=(ku0+ku1)/2,cv=(kv0+kv1)/2;const [nx,ny]=toWorld(p,cu,cv);p.x=Math.round(nx*1000)/1000;p.y=Math.round(ny*1000)/1000;
+  p.l=r8(ku1-ku0);p.w=r8(kv1-kv0);p.notch=R.map(r=>[r8(r[0]-cu),r8(r[1]-cv),r8(r[2]-cu),r8(r[3]-cv)]).filter(r=>r[2]-r[0]>0.1&&r[3]-r[1]>0.1);
+  return JSON.stringify(p.notch)!==before||Math.abs(ku1-ku0-2*D.a)>0.01||Math.abs(kv1-kv0-2*D.b)>0.01?1:0;}
 function pTopMax(p){return Math.max(...pCorners(p).map(([u,v])=>topL(p,u,v)));}
 function samplePts(p,step){const D=pDims(p),sh=0.06;const nu=clamp(Math.ceil(2*D.a/step),1,64),nv=clamp(Math.ceil(2*D.b/step),1,40);const out=[];
-  for(let i=0;i<=nu;i++)for(let j=0;j<=nv;j++){const u=-D.a+sh+(2*D.a-2*sh)*i/nu,v=-D.b+sh+(2*D.b-2*sh)*j/nv;out.push(toWorld(p,u,v));}return out;}
+  for(let i=0;i<=nu;i++)for(let j=0;j<=nv;j++){const u=-D.a+sh+(2*D.a-2*sh)*i/nu,v=-D.b+sh+(2*D.b-2*sh)*j/nv;if(inNotchL(p,u,v,-0.06))continue;out.push(toWorld(p,u,v));}return out;}
 function overlapBox(a,b){return a.x0<b.x1-0.05&&a.x1>b.x0+0.05&&a.y0<b.y1-0.05&&a.y1>b.y0+0.05;}
 // the height the piece's low edge comes to rest at, sitting on whatever is under it
 function restZ(p,others){const bb=pBox(p);const cand=others.filter(q=>q!==p&&overlapBox(bb,pBox(q)));if(!cand.length)return 0;
@@ -1702,9 +1751,9 @@ function cutTxt(p){if(p.k==='lum'&&lumTilt(p))return `plumb cut ${deg(Math.atan(
 function buildBuildModel(d){const M={cuts:[],sheetsCut:[],roofing:[],other:[],checks:[],notes:[],hardware:[]};
   const lum={},sh={};
   d.pieces.forEach(p=>{if(p.k==='lum'){const ct=cutTxt(p);const k=p.mat+'|'+r8(p.len)+'|'+ct;(lum[k]=lum[k]||{mat:p.mat,len:r8(p.len),note:ct,ids:[]}).ids.push(d.pieces.indexOf(p)+1);}
-    else{const w=Math.min(p.w,p.l),l=Math.max(p.w,p.l);const k=p.mat+'|'+w+'|'+l;(sh[k]=sh[k]||{mat:p.mat,w,l,ids:[]}).ids.push(d.pieces.indexOf(p)+1);}});
+    else{const w=Math.min(p.w,p.l),l=Math.max(p.w,p.l);const nt=notchTxt(p);const k=p.mat+'|'+w+'|'+l+'|'+nt;(sh[k]=sh[k]||{mat:p.mat,w,l,nt,ids:[]}).ids.push(d.pieces.indexOf(p)+1);}});
   Object.values(lum).sort((a,b)=>LUM_ORDER.indexOf(a.mat)-LUM_ORDER.indexOf(b.mat)||b.len-a.len).forEach(g=>M.cuts.push({group:LUMBER[g.mat].n,part:`Piece ${g.ids.map(i=>'#'+i).join(', ')}`,mat:g.mat,len:g.len,qty:g.ids.length,note:g.note||'square cut'}));
-  Object.values(sh).forEach(g=>{const full=g.w>=48&&g.l>=96;M.sheetsCut.push({group:SHEETS[g.mat].n,part:`Piece ${g.ids.map(i=>'#'+i).join(', ')}`,sheet:g.mat,res:{pcs:g.ids.map(()=>({w:g.w,h:g.l,full,shaped:false})),area:g.w*g.l*g.ids.length},note:''});});
+  Object.values(sh).forEach(g=>{const full=g.w>=48&&g.l>=96;M.sheetsCut.push({group:SHEETS[g.mat].n,part:`Piece ${g.ids.map(i=>'#'+i).join(', ')}`,sheet:g.mat,res:{pcs:g.ids.map(()=>({w:g.w,h:g.l,full,shaped:false})),area:g.w*g.l*g.ids.length},note:g.nt?'Cut to fit the wall: '+g.nt:''});});
   if(!d.base.given){M.notes.push('The base is not provided: build it from boards and sheets like the rest of the mockup.');}
   // roofing on covered sheets
   const R=M.roofing,add=(key,n,qty,unit,note,group)=>{if(qty>0)R.push({key,n,qty,unit,note:note||'',group:group||''});};
@@ -1799,7 +1848,7 @@ function moveSel(dir){const o=bSel(),d=BUI.d;if(!o)return;const isItem=BUI.sel.t
     o.z=Math.max(0,r8(o.z+st));o.hold=true;bcommit(true);const rest=restZ(o,d.pieces.filter(q=>q!==o));if(o.z<rest-0.12)toast(`Now ${frac(rest-o.z)} into the wood under it. Tap “Onto wood” to sit it on top.`);return;}
   const ax=dir==='left'||dir==='right'?'x':'y',sg=dir==='left'||dir==='back'?-1:1,st=stepFor(o,ax)*sg;
   if(isItem){o[ax]=r8(clamp(o[ax]+st,0,ax==='x'?d.base.W:d.base.L));bcommit(true);return;}
-  const before=overlapIds(o);o[ax]=r8(o[ax]+st);afterMove(o,before);bcommit(true);}
+  const before=overlapIds(o);o[ax]=r8(o[ax]+st);autoNotch(o);afterMove(o,before);bcommit(true);}
 // ---------- adding and changing pieces ----------
 function addPiece(){const A=BUI.add,d=BUI.d;let p;
   if(A.stock==='sheet'){const w=parseLen(A.w),l=parseLen(A.l);if(!(w>0&&l>0)){toast('Type a width and a length for the sheet, like 48 and 96.');return;}
@@ -1807,14 +1856,15 @@ function addPiece(){const A=BUI.add,d=BUI.d;let p;
     p={id:uid(),k:'sh',mat:A.sheet,w:Math.min(w,l),l:Math.max(w,l),x:d.base.W/2,y:d.base.L/2,z:999,rot:0,tilt:{p:0,low:'u+'},cover:''};}
   else{const len=parseLen(A.len);if(!(len>0)){toast('Type a length, like 48 or 3′ 6″.');return;}if(len>192){toast('Lumber is sold up to 16′ (192″). Use two pieces.');return;}
     p={id:uid(),k:'lum',mat:A.stock,len:r8(len),lay:A.lay,x:d.base.W/2,y:d.base.L/2,z:999,rot:0,cut:'full',taper:null};}
-  const D=pDims(p);p.x=r8(clamp(p.x,Math.min(D.a,d.base.W/2),d.base.W-Math.min(D.a,d.base.W/2)));d.pieces.push(p);BUI.sel={type:'piece',id:p.id};bcommit(true);
-  toast(`${pName(p)} added in the middle. Drag it into place on the Build view.`);}
+  const D=pDims(p);p.x=r8(clamp(p.x,Math.min(D.a,d.base.W/2),d.base.W-Math.min(D.a,d.base.W/2)));d.pieces.push(p);BUI.sel={type:'piece',id:p.id};const cutNow=p.k==='sh'&&autoNotch(p)>0;bcommit(true);
+  toast(cutNow?`${pName(p)} added and cut to fit around the wall. Drag it into place on the Build view.`:`${pName(p)} added in the middle. Drag it into place on the Build view.`);}
 function copyPiece(id,dist){const d=BUI.d,p=d.pieces.find(q=>q.id===id);if(!p)return;const c=clone(p);c.id=uid();const D=pDims(p);
   const off=dist?dist:2*D.b+0.5;const [ux,uy]=pAx(p);c.x=r8(p.x-uy*off);c.y=r8(p.y+ux*off);if(c.k==='sh')c.z=p.z;
   d.pieces.splice(d.pieces.indexOf(p)+1,0,c);BUI.sel={type:'piece',id:c.id};bcommit(true);toast(dist?`Copied ${frac(dist)} over.`:'Copied next to it.');}
 function mirPos(m,x,y){const W=BUI.d.base.W,L=BUI.d.base.L;return m==='lr'?[W-x,y]:m==='fb'?[x,L-y]:[W-x,L-y];}
 function mirRot(m,r){r=r||0;return ((m==='lr'?180-r:m==='fb'?-r:r+180)%360+360)%360;}
-function mirPiece(p,m){const c=clone(p);c.id=uid();const q=mirPos(m,p.x,p.y);c.x=r8(q[0]);c.y=r8(q[1]);c.rot=mirRot(m,p.rot);return c;}
+function mirPiece(p,m){const c=clone(p);c.id=uid();const q=mirPos(m,p.x,p.y);c.x=r8(q[0]);c.y=r8(q[1]);c.rot=mirRot(m,p.rot);
+  if(m!=='rot180'){if(c.notch)c.notch=c.notch.map(n=>[n[0],-n[3],n[2],-n[1]]);if(c.tilt&&(c.tilt.low==='v-'||c.tilt.low==='v+'))c.tilt.low=c.tilt.low==='v-'?'v+':'v-';}return c;}
 function mirItem(it,m){const c=clone(it);c.id=uid();const q=mirPos(m,it.x,it.y);c.x=r8(q[0]);c.y=r8(q[1]);if(typeof it.rot==='number')c.rot=mirRot(m,it.rot)%180;return c;}
 function sameSpot(a,b){if(a.k!==b.k||a.mat!==b.mat||a.lay!==b.lay)return false;if(Math.abs(a.x-b.x)>0.5||Math.abs(a.y-b.y)>0.5||Math.abs((a.z||0)-(b.z||0))>0.5)return false;
   const ra=((a.rot||0)%180+180)%180,rb=((b.rot||0)%180+180)%180;if(Math.min(Math.abs(ra-rb),180-Math.abs(ra-rb))>1)return false;
@@ -1859,7 +1909,7 @@ function bRenderLeft(){const el=document.getElementById('left');const sc=el.scro
   el.innerHTML=h;el.scrollTop=sc;bRenderInspector();}
 function lenField(obj,k,label){const v=getK(target(obj),k);return `<div class="row"><span class="lab">${esc(label)}</span><span class="stepper"><button type="button" data-obj="${obj}" data-step="${k}" data-d="-0.125" data-min="0.25" data-max="192" aria-label="Shorter">−</button><input type="text" inputmode="decimal" data-obj="${obj}" data-blen="${k}" value="${esc(typeof v==='number'?frac(v,''):v)}" aria-label="${esc(label)}" autocomplete="off"><button type="button" data-obj="${obj}" data-step="${k}" data-d="0.125" data-min="0.25" data-max="192" aria-label="Longer">+</button></span></div>`;}
 function bListHtml(){const d=BUI.d,s=BUI.sel;let h='';const li=(type,id,label,sub)=>`<div class="lirow"><button type="button" class="li ${s&&s.type===type&&s.id===id?'on':''}" data-bpick="${type}" data-id="${id}"><b>${esc(label)}</b><span>${esc(sub)}</span></button><button type="button" class="rm" data-brm="${type}" data-id="${id}" aria-label="Remove ${esc(label)}">✕</button></div>`;
-  d.pieces.forEach((p,i)=>h+=li('piece',p.id,`#${i+1} ${pName(p)}`,`${layTxt(p)}${cutTxt(p)?' · '+cutTxt(p).split(':')[0]:''}${p.k==='sh'&&p.tilt&&p.tilt.p?' · '+pitchTxt(p.tilt.p):''}${p.cover?' · '+MATS[p.cover].n:''} · bottom at ${frac(p.z)}`));
+  d.pieces.forEach((p,i)=>h+=li('piece',p.id,`#${i+1} ${pName(p)}`,`${layTxt(p)}${cutTxt(p)?' · '+cutTxt(p).split(':')[0]:''}${p.k==='sh'&&p.tilt&&p.tilt.p?' · '+pitchTxt(p.tilt.p):''}${p.k==='sh'&&p.notch&&p.notch.length?' · cut to fit the wall':''}${p.cover?' · '+MATS[p.cover].n:''} · bottom at ${frac(p.z)}`));
   d.items.forEach(it=>h+=li('item',it.id,ITEM_KINDS[it.kind].n,itemSizeTxt(it)));
   return h||'<p class="hint">Nothing yet. Add a piece above.</p>';}
 function bRenderInspector(){const el=document.getElementById('inspector');if(!el)return;const o=bSel(),d=BUI.d;
@@ -1883,6 +1933,7 @@ function bRenderInspector(){const el=document.getElementById('inspector');if(!el
       h+=`<div class="row"><span class="lab">Slope</span><span class="stepper"><button type="button" data-bact="slope" data-dir="-1" aria-label="Less slope">−</button><span>${pitchTxt(r8(pitchOf(p)*8)/8)}</span><button type="button" data-bact="slope" data-dir="1" aria-label="More slope">+</button></span></div>`;
       h+=stepper('p',p.taper.h0>=p.taper.h1?'taper.h0':'taper.h1','High end',0.125,0.5,dd)+stepper('p',p.taper.h0>=p.taper.h1?'taper.h1':'taper.h0','Low end',0.125,0.25,dd);
       h+=`<p class="hint">Rip from ${frac(hi)} at the high end down to ${frac(lo)} at the low end. The low end points ${SIDE_NAMES[lowEnd]}.</p><div class="btnrow"><button type="button" class="btn light" data-bact="flip">Flip high and low ends</button></div>`;}}
+  if(p.k==='sh'&&p.lay!=='up'){h+=`<div class="subhead">Cut to fit walls</div>${p.notch&&p.notch.length?`<p class="hint">Cut around the wall: ${esc(notchTxt(p))}.</p><div class="btnrow"><button type="button" class="btn light" data-bact="uncut">Full sheet, no cuts</button></div>`:`<p class="hint">${p.noCut?'Automatic cutting is off for this sheet.':'Not touching a wall.'}</p><div class="btnrow"><button type="button" class="btn light" data-bact="cutfit">Cut around walls</button></div>`}`;}
   if(p.k==='sh'&&p.lay!=='up'){h+=`<div class="subhead">Slope and roofing</div>`+stepper('p','tilt.p','Slope',1,0,12,v=>pitchTxt(v),true);
     if(p.tilt.p)h+=seg('p','tilt.low','Low side',['u-','u+','v-','v+'].map(s=>[s,{L:'Left',R:'Right',B:'Back',F:'Front'}[sideWorld(p,s)]]));
     h+=`<div class="btnrow"><button type="button" class="btn light" data-bact="match">Match the slope of the wood under it</button></div>`;
@@ -1898,7 +1949,7 @@ function bOnControl(e){const b=e.target.closest('button');if(!b)return;const d=B
   if(b.dataset.act==='rotItem'){const it=bSel();it.rot=((it.rot||0)+90)%180;bcommit(true);return;}
   if(b.dataset.bact){const a=b.dataset.bact,p=bSel();
     if(a==='addPiece')return addPiece();if(a==='del')return removeSel();
-    if(a==='rot'){rotPiece(p,+b.dataset.deg);bcommit(true);return;}
+    if(a==='rot'){rotPiece(p,+b.dataset.deg);autoNotch(p);bcommit(true);return;}
     if(a==='drop'){p.hold=false;bcommit(true);return;}
     if(a==='mv'){moveSel(b.dataset.dir);return;}
     if(a==='nudge'){const dz=+b.dataset.dz;const d=BUI.d;const rest=restZ(p,d.pieces.slice(0,d.pieces.indexOf(p)));let nz=Math.round((p.z+dz)*8)/8;
@@ -1908,6 +1959,8 @@ function bOnControl(e){const b=e.target.closest('button');if(!b)return;const d=B
     if(a==='inudge'){const dz=+b.dataset.dz;p.dz=dz===0?0:r8(clamp((p.dz||0)+dz,-6,24));bcommit(true);return;}
     if(a==='layer'){moveLayer(p,b.dataset.to);bcommit(true);toast({top:'Moved to the top of the stack.',bottom:'Moved to the bottom of the stack.',up:'Moved up one layer.',down:'Moved down one layer.'}[b.dataset.to]);return;}
     if(a==='copy'){copyPiece(p.id,+b.dataset.dist||0);return;}
+    if(a==='uncut'){p.notch=[];p.noCut=true;bcommit(true);toast('Full sheet again. It will not be cut automatically.');return;}
+    if(a==='cutfit'){p.noCut=false;const r=autoNotch(p);bcommit(true);toast(p.notch&&p.notch.length?'Cut to fit around the wall.':'No wall under this sheet to cut around.');return;}
     if(a==='mirror'){if(!TEACH.allowMirror)return;mirrorSel(b.dataset.m);return;}
     if(a==='flip'){const t=p.taper.h0;p.taper.h0=p.taper.h1;p.taper.h1=t;bcommit(true);return;}
     if(a==='slope'){if(setTaperSlope(p,+b.dataset.dir))bcommit(true);return;}
@@ -1921,6 +1974,7 @@ function bOnControl(e){const b=e.target.closest('button');if(!b)return;const d=B
     setK(t,k,v);afterSet(obj,t,k);if(obj==='add'){bRenderLeft();return;}bcommit(true);}}
 function afterSet(obj,t,k){if(obj!=='p')return;const p=t;
   if(k==='z')p.hold=true;
+  if(p.k==='sh'&&['x','y','w','l','lay'].includes(k)){if(p.lay==='up')p.notch=[];else autoNotch(p);}
   if(p.k==='lum'){const dd=LUMBER[p.mat].d;
     if(k==='cut'){if(p.cut==='rip')p.taper={h0:Math.min(dd,p.taper?Math.max(p.taper.h0,p.taper.h1):dd),h1:0};if(p.cut==='taper'){p.taper={h0:dd,h1:dd};setTaperSlope(p,1);}if(p.cut==='full')p.taper=null;}
     if(p.cut==='rip'&&p.taper)p.taper.h1=p.taper.h0;
@@ -1952,7 +2006,9 @@ function bPlanInner(opt){const d=BUI.d,B=d.base,sel=opt.export?null:BUI.sel;let 
   const halo='stroke="#ffffff" stroke-width="0.4" stroke-linejoin="round" paint-order="stroke" pointer-events="none"';
   const ps=d.pieces.filter(p=>!(BUI.hideSheets&&!opt.export&&p.k==='sh')).slice().sort((a,b)=>pTopMax(a)-pTopMax(b));let selO='';
   ps.forEach(p=>{const f=pFoot(p).map(q=>n2(q[0])+','+n2(q[1])).join(' ');const col=p.k==='sh'&&p.cover?MATS[p.cover].color:PIECE_COL[p.k];const isSel=sel&&sel.type==='piece'&&sel.id===p.id;
-    o+=`<polygon data-hit="piece" data-id="${p.id}" points="${f}" fill="${col}" fill-opacity="${p.k==='sh'?(p.cover?0.85:0.78):1}" stroke="${p.k==='sh'?'#9c8452':'#7a5c2e'}" stroke-width="${p.k==='sh'?0.2:0.16}"/>`;
+    if(p.k==='sh'&&p.lay!=='up'&&p.notch&&p.notch.length){shRuns(p).forEach(r=>{const f2=[[r[0],r[1]],[r[2],r[1]],[r[2],r[3]],[r[0],r[3]]].map(([u,v])=>toWorld(p,u,v)).map(q=>n2(q[0])+','+n2(q[1])).join(' ');o+=`<polygon data-hit="piece" data-id="${p.id}" points="${f2}" fill="${col}" fill-opacity="${p.cover?0.85:0.78}" stroke="none"/>`;});
+      o+=`<path d="${shEdges(p).map(e=>{const a=toWorld(p,e[0],e[1]),b=toWorld(p,e[2],e[3]);return `M${n2(a[0])},${n2(a[1])}L${n2(b[0])},${n2(b[1])}`;}).join('')}" stroke="#9c8452" stroke-width="0.2" fill="none" pointer-events="none"/>`;}
+    else o+=`<polygon data-hit="piece" data-id="${p.id}" points="${f}" fill="${col}" fill-opacity="${p.k==='sh'?(p.cover?0.85:0.78):1}" stroke="${p.k==='sh'?'#9c8452':'#7a5c2e'}" stroke-width="${p.k==='sh'?0.2:0.16}"/>`;
     const D=pDims(p),i=d.pieces.indexOf(p)+1;let ang=p.rot||0;if(ang>90&&ang<=270)ang-=180;
     if(p.k==='lum'){const big=Math.max(2*D.a,2*D.b);if(big>=8)o+=`<text x="${n2(p.x)}" y="${n2(p.y)}" font-size="${D.b*2>=3?1.1:0.95}" text-anchor="middle" dominant-baseline="central" fill="#1f1d1a" transform="rotate(${D.a>=D.b?ang:ang+90} ${n2(p.x)} ${n2(p.y)})" ${halo}>#${i} ${esc(frac(p.len))}</text>`;
       else o+=`<text x="${n2(p.x)}" y="${n2(p.y)}" font-size="0.9" text-anchor="middle" dominant-baseline="central" fill="#1f1d1a" ${halo}>#${i}</text>`;
@@ -1983,7 +2039,7 @@ function bBindPlan(){const svg=document.getElementById('plansvg');if(!svg)return
     else bSnapMove(down.p,pt[0]+down.off[0],pt[1]+down.off[1]);bPlanRefresh();};
   const up=e=>{BUI.dragging=false;if(!down)return;const dn=down;down=null;
     if(!dn.moved&&dn.kind==='piece'&&dn.wasSel&&dn.hits.length>1){const i=dn.hits.indexOf(dn.p);const nx=dn.hits[(i+1)%dn.hits.length];BUI.sel={type:'piece',id:nx.id};bPlanRefresh();bRenderInspector();bListRefresh();toast(`Picked ${pLabel(BUI.d,nx)} (underneath).`);return;}
-    if(dn.moved){if(dn.kind==='piece')afterMove(dn.p,dn.before);bcommit(false);}};
+    if(dn.moved){if(dn.kind==='piece'){const r=autoNotch(dn.p);afterMove(dn.p,dn.before);if(r>0)toast('Sheet cut to fit around the wall.');}bcommit(false);}};
   svg.onpointerup=up;svg.onpointercancel=up;}
 function bQuickRefresh(){const q=document.getElementById('qnudge');if(q)q.innerHTML=quickNudge();}
 function bListRefresh(){bQuickRefresh();const l=document.querySelector('#left .sec.list');if(l)l.innerHTML=`<div class="subhead">Pieces (${BUI.d.pieces.length})</div>${bListHtml()}`;}
@@ -2026,8 +2082,11 @@ function bv3build(){const d=BUI.d,G=V3.root;while(G.children.length){const c=G.c
   const grid=new THREE.GridHelper(Math.max(B.W,B.L)*2.4,Math.round(Math.max(B.W,B.L)*2.4/12),0xcfc8bb,0xe3ddd2);grid.position.set(B.W/2,B.given?-4.3:-0.05,B.L/2);G.add(grid);
   const sel=BUI.sel&&BUI.sel.type==='piece'?BUI.sel.id:null;
   d.pieces.forEach((p,i)=>{if(BUI.hideSheets&&p.k==='sh')return;const shade=(i*37%17)/17*0.08;const base=new THREE.Color(p.k==='sh'?(p.mat.startsWith('osb')?0xcdab6c:0xe2c690):0xd9b77e);base.offsetHSL(0,0,shade-0.04);
-    const em=p.id===sel?0x6a2a00:(V3.move?0x0b2238:0);hexMesh(G,p,(u,v)=>botL(p,u,v),(u,v)=>topL(p,u,v),base,em);
-    if(p.k==='sh'&&p.cover&&MATS[p.cover]){const ct=Math.max(0.15,coverT({mat:p.cover}));const m=hexMesh(G,p,(u,v)=>topL(p,u,v)+0.01,(u,v)=>topL(p,u,v)+ct,new THREE.Color(MATS[p.cover].color),p.id===sel?0x3a1500:0);}});
+    const em=p.id===sel?0x6a2a00:(V3.move?0x0b2238:0);
+    const parts=p.k==='sh'&&p.lay!=='up'&&p.notch&&p.notch.length?shRuns(p).map(r=>runPiece(p,r)):[p];
+    parts.forEach(q=>{const F=fn=>q===p?fn:(uq,vq)=>{const [x,y]=toWorld(q,uq,vq);const [u,v]=toLocal(p,x,y);return fn(u,v);};
+      hexMesh(G,q,F((u,v)=>botL(p,u,v)),F((u,v)=>topL(p,u,v)),base,em);
+      if(p.k==='sh'&&p.cover&&MATS[p.cover]){const ct=Math.max(0.15,coverT({mat:p.cover}));hexMesh(G,q,F((u,v)=>topL(p,u,v)+0.01),F((u,v)=>topL(p,u,v)+ct),new THREE.Color(MATS[p.cover].color),p.id===sel?0x3a1500:0);}});});
   d.items.forEach(it=>{const S=surfaceAt(d,it.x,it.y);const mem=!S.cover||MATS[S.cover].sys==='membrane';G.add(item3D(it,S.z,{mem,color:S.cover?MATS[S.cover].color:null,th:Math.atan(pitchOf(S.p||{k:'x'})/12),base:B.given?-0.75:0}));});
   V3.dirty=true;}
 // 3D pointer handling for build mode (called from bind3d)
