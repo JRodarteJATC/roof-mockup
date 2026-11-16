@@ -1265,7 +1265,7 @@ function renderTeacher(){const b=document.getElementById('tBody');
     <p class="hint">When allowed, a selected piece shows Copy buttons (beside it, or 12″, 16″ or 24″ on center). This setting stays on this iPad.</p>
     <div class="subhead">Mirror in Build mode</div><div class="btnrow"><button type="button" class="btn ${TEACH.allowMirror?'':'light'}" data-t="mirOn">Allow mirror</button><button type="button" class="btn ${TEACH.allowMirror?'light':''}" data-t="mirOff">No mirror</button></div>
     <p class="hint">When allowed, a selected piece or detail shows Mirror buttons, and the left panel can mirror the whole build to the other side of the Z wall. This setting stays on this iPad.</p>
-    <p class="hint"><b>App version: Nov 16, 2026 · 3:00 PM</b> (sheets cut to the Z wall and follow tapered or sloped boards)</p>
+    <p class="hint"><b>App version: Nov 16, 2026 · 3:15 PM</b> (Select several in both modes; sheets cut to the Z wall and follow tapered or sloped boards)</p>
     <div class="subhead">Groups</div><div class="btnrow">${[3,4,5,6].map(n=>`<button type="button" class="btn ${TEACH.groups===n?'':'light'}" data-t="groups" data-n="${n}">${n} groups</button>`).join('')}</div>
     <div class="btnrow"><button type="button" class="btn light" data-t="group">Change this iPad's group</button></div>
     ${HOOKS.teacherExtra?HOOKS.teacherExtra():''}
@@ -1359,6 +1359,9 @@ function planInner(d,M,opt){
       PLAN.draft.forEach((p,i)=>o+=`<circle cx="${p[0]}" cy="${p[1]}" r="${i===0?1.4:0.9}" fill="${i===0?'#c4521f':'#fff'}" stroke="#c4521f" stroke-width="0.3" pointer-events="none"/>`);}
     if(PLAN.tool==='wall'&&PLAN.wallStart){const h=PLAN.hover||PLAN.wallStart;o+=`<line x1="${PLAN.wallStart[0]}" y1="${PLAN.wallStart[1]}" x2="${h[0]}" y2="${h[1]}" stroke="#7d776d" stroke-width="1.2" stroke-opacity="0.6" pointer-events="none"/><circle cx="${PLAN.wallStart[0]}" cy="${PLAN.wallStart[1]}" r="0.9" fill="#7d776d" pointer-events="none"/>`;
       if(PLAN.hover)o+=`<text x="${n2((PLAN.wallStart[0]+h[0])/2)}" y="${n2((PLAN.wallStart[1]+h[1])/2-1.6)}" font-size="1.4" text-anchor="middle" fill="#1f1d1a" pointer-events="none">${esc(frac(dist(PLAN.wallStart,h)))}</text>`;}
+    if(PLAN.tool==='multi'&&(UI.multi||[]).length&&MODE!=='build'){const D0=UI.d;(UI.multi||[]).forEach(m=>{if(m.type==='area'){const a=D0.areas.find(x=>x.id===m.id);if(a)o+=`<polygon points="${a.pts.map(p=>p[0]+','+p[1]).join(' ')}" fill="#1f6fb2" fill-opacity="0.15" stroke="#1f6fb2" stroke-width="0.6" stroke-dasharray="1.2 0.5" pointer-events="none"/>`;}
+      else if(m.type==='wall'){const w=D0.walls.find(x=>x.id===m.id);if(w)o+=`<line x1="${w.a[0]}" y1="${w.a[1]}" x2="${w.b[0]}" y2="${w.b[1]}" stroke="#1f6fb2" stroke-width="2.2" stroke-opacity="0.45" pointer-events="none"/>`;}
+      else{const it=D0.items.find(x=>x.id===m.id);if(it)o+=`<circle cx="${it.x}" cy="${it.y}" r="3.2" fill="none" stroke="#1f6fb2" stroke-width="0.6" stroke-dasharray="1 0.5" pointer-events="none"/>`;}});}
     if(PLAN.hover&&(PLAN.tool==='area'||PLAN.tool==='wall'||PLAN.tool==='item'))o+=`<circle cx="${PLAN.hover[0]}" cy="${PLAN.hover[1]}" r="0.6" fill="#1f6fb2" pointer-events="none"/><text x="${PLAN.hover[0]+1.2}" y="${PLAN.hover[1]-1.2}" font-size="1.2" fill="#1f6fb2" pointer-events="none">${esc(frac(PLAN.hover[0]))}, ${esc(frac(PLAN.hover[1]))}</text>`;
   }
   return o;
@@ -1431,6 +1434,11 @@ function bindPlan(){
       else if(h==='wall'||h==='wallend'){d.walls=d.walls.filter(w=>w.id!==id);toast('Wall removed.');}
       else if(h==='item'){d.items=d.items.filter(i=>i.id!==id);toast('Detail removed.');}
       UI.sel=null;commit(true);e.preventDefault();return;}
+    if(PLAN.tool==='multi'){const tg=e.target.closest('[data-hit]');if(!tg)return;let h=tg.dataset.hit,id=tg.dataset.id;if(id&&id.endsWith('~m'))id=id.slice(0,-2);
+      const type=(h==='area'||h==='edge'||h==='vertex'||h==='mid')?'area':(h==='wall'||h==='wallend')?'wall':h==='item'?'item':null;if(!type)return;
+      UI.multi=UI.multi||[];const was=UI.multi.some(m=>m.type===type&&m.id===id);if(!was)UI.multi.push({type,id});
+      const orig=UI.multi.map(m=>{const o=m.type==='area'?d.areas.find(a=>a.id===m.id):m.type==='wall'?d.walls.find(w=>w.id===m.id):d.items.find(i=>i.id===m.id);if(!o)return null;return [m,o,m.type==='area'?clone(o.pts):m.type==='wall'?[o.a.slice(),o.b.slice()]:[o.x,o.y]];}).filter(Boolean);
+      PLAN.drag={kind:'multi',start:p0,orig,hit:{type,id},was};PLAN.moved=false;try{wrap.setPointerCapture(e.pointerId);}catch(_){}renderInspector();planRefresh();e.preventDefault();return;}
     // select tool
     const tgt=e.target.closest('[data-hit]');
     if(!tgt){UI.sel=null;renderInspector();planRefresh();return;}
@@ -1451,6 +1459,8 @@ function bindPlan(){
   };
   wrap.onpointermove=e=>{
     let p0=planPt(e);if(!p0)return;const d=UI.d;if(PLAN.drag&&PLAN.twin)p0=mirP(p0);
+    if(PLAN.tool==='multi'&&PLAN.drag&&PLAN.drag.kind==='multi'){const D=PLAN.drag,g=d.grid;const dx=Math.round((p0[0]-D.start[0])/g)*g,dy=Math.round((p0[1]-D.start[1])/g)*g;if(!dx&&!dy&&!PLAN.moved)return;PLAN.moved=true;
+      D.orig.forEach(([m,o,v])=>{if(m.type==='area')o.pts=v.map(p=>[p[0]+dx,p[1]+dy]);else if(m.type==='wall'){o.a=[v[0][0]+dx,v[0][1]+dy];o.b=[v[1][0]+dx,v[1][1]+dy];}else{o.x=clamp(v[0]+dx,0,d.base.W);o.y=clamp(v[1]+dy,0,d.base.L);}});rebuild();planRefresh();e.preventDefault();return;}
     if(PLAN.tool!=='select'){PLAN.hover=snapPt(p0);planRefresh();return;}
     const D=PLAN.drag;if(!D)return;PLAN.moved=true;
     if(D.kind==='vertex'){const a=d.areas.find(a=>a.id===D.id);a.pts[D.i]=snapPt(p0,{skipArea:a.id});}
@@ -1460,7 +1470,7 @@ function bindPlan(){
     else if(D.kind==='area'){const a=d.areas.find(a=>a.id===D.id);const g=d.grid;const dx=Math.round((p0[0]-D.start[0])/g)*g,dy=Math.round((p0[1]-D.start[1])/g)*g;a.pts=D.orig.map(p=>[p[0]+dx,p[1]+dy]);}
     rebuild();planRefresh();e.preventDefault();
   };
-  const end=e=>{if(PLAN.drag){const m=PLAN.moved;PLAN.drag=null;if(m)commit(true);}};
+  const end=e=>{if(PLAN.drag){const D=PLAN.drag,m=PLAN.moved;PLAN.drag=null;if(D.kind==='multi'){if(!m&&D.was)UI.multi=UI.multi.filter(x=>!(x.type===D.hit.type&&x.id===D.hit.id));if(m){commit(true);toast(`Moved ${UI.multi.length} together.`);}else{renderInspector();planRefresh();}return;}if(m)commit(true);}};
   wrap.onpointerup=end;wrap.onpointercancel=end;
   wrap.onpointerleave=()=>{if(PLAN.tool!=='select'){PLAN.hover=null;planRefresh();}};
 }
@@ -1942,11 +1952,18 @@ function bRenderLeft(){const el=document.getElementById('left');const sc=el.scro
   h+=`<div class="sec list"><div class="subhead">Pieces (${d.pieces.length})</div>${bListHtml()}</div>`;
   el.innerHTML=h;el.scrollTop=sc;bRenderInspector();}
 function lenField(obj,k,label){const v=getK(target(obj),k);return `<div class="row"><span class="lab">${esc(label)}</span><span class="stepper"><button type="button" data-obj="${obj}" data-step="${k}" data-d="-0.125" data-min="0.25" data-max="192" aria-label="Shorter">−</button><input type="text" inputmode="decimal" data-obj="${obj}" data-blen="${k}" value="${esc(typeof v==='number'?frac(v,''):v)}" aria-label="${esc(label)}" autocomplete="off"><button type="button" data-obj="${obj}" data-step="${k}" data-d="0.125" data-min="0.25" data-max="192" aria-label="Longer">+</button></span></div>`;}
-function bListHtml(){const d=BUI.d,s=BUI.sel;let h='';const li=(type,id,label,sub)=>`<div class="lirow"><button type="button" class="li ${s&&s.type===type&&s.id===id?'on':''}" data-bpick="${type}" data-id="${id}"><b>${esc(label)}</b><span>${esc(sub)}</span></button><button type="button" class="rm" data-brm="${type}" data-id="${id}" aria-label="Remove ${esc(label)}">✕</button></div>`;
+function bListHtml(){const d=BUI.d,s=BUI.sel;let h='';const li=(type,id,label,sub)=>`<div class="lirow"><button type="button" class="li ${(s&&s.type===type&&s.id===id)||(BUI.tool==='multi'&&(BUI.multi||[]).some(m=>m.type===type&&m.id===id))?'on':''}" data-bpick="${type}" data-id="${id}"><b>${esc(label)}</b><span>${esc(sub)}</span></button><button type="button" class="rm" data-brm="${type}" data-id="${id}" aria-label="Remove ${esc(label)}">✕</button></div>`;
   d.pieces.forEach((p,i)=>h+=li('piece',p.id,`#${i+1} ${pName(p)}`,`${layTxt(p)}${cutTxt(p)?' · '+cutTxt(p).split(':')[0]:''}${p.k==='sh'&&p.tilt&&p.tilt.p?' · '+pitchTxt(p.tilt.p):''}${p.k==='sh'&&p.notch&&p.notch.length?' · cut to fit the wall':''}${p.cover?' · '+MATS[p.cover].n:''} · bottom at ${frac(p.z)}`));
   d.items.forEach(it=>h+=li('item',it.id,ITEM_KINDS[it.kind].n,itemSizeTxt(it)));
   return h||'<p class="hint">Nothing yet. Add a piece above.</p>';}
 function bRenderInspector(){const el=document.getElementById('inspector');if(!el)return;const o=bSel(),d=BUI.d;
+  if(BUI.tool==='multi'){const n=(BUI.multi||[]).length,st=BUI.mstep||1;
+    el.innerHTML=`<div class="insp"><div class="insphead"><b>${n?n+' selected':'Select several'}</b><span class="hint">${n?'Move, turn or delete them together.':'Tap pieces and details on the Build view or in the list below.'}</span></div>
+      <div class="btnrow"><button type="button" class="btn light" data-bmall="1">Select everything</button>${n?'<button type="button" class="btn light" data-bmclear="1">Clear</button>':''}</div>
+      ${n?`<div class="subhead">Move together</div><div class="row"><span class="lab">Each tap</span><span class="seg">${[[0.125,'1/8″'],[1,'1″'],[3.5,'3-1/2″'],[12,'12″']].map(([v,t])=>`<button type="button" data-bmstep="${v}" class="${st===v?'on':''}">${t}</button>`).join('')}</span></div>
+      <div class="btnrow"><button type="button" class="btn light" data-bmm="-1,0">← Left</button><button type="button" class="btn light" data-bmm="1,0">Right →</button><button type="button" class="btn light" data-bmm="0,-1">↑ Back</button><button type="button" class="btn light" data-bmm="0,1">↓ Front</button></div>
+      <div class="btnrow"><button type="button" class="btn light" data-bmrot="90">Turn the group 90°</button></div>
+      <div class="btnrow"><button type="button" class="btn danger" data-bmdel="1">Delete ${n}</button></div>`:''}</div>`;return;}
   if(!o){el.innerHTML=`<div class="insp empty"><b>Nothing selected</b><span class="hint">Tap a piece on the Build view or in the list below. Tap the same spot again to reach the piece underneath.</span></div>`;return;}
   let h='<div class="insp">';
   if(BUI.sel.type==='item'){const it=o;h+=`<div class="insphead"><b>${ITEM_KINDS[it.kind].n}</b><span class="hint">${(()=>{const S=surfaceAt(d,it.x,it.y);return S.p?`on ${esc(pLabel(d,S.p))}`:'not on any wood';})()}</span></div>`;
@@ -1977,8 +1994,16 @@ function bRenderInspector(){const el=document.getElementById('inspector');if(!el
   h+=`<div class="btnrow"><button type="button" class="btn danger" data-bact="del">Delete</button></div></div>`;el.innerHTML=h;}
 function bOnControl(e){const b=e.target.closest('button');if(!b)return;const d=BUI.d;{const p0=bSel();if(p0&&p0.k==='lum'&&!p0.tilt)p0.tilt={p:0,low:'u+'};}
   if(b.dataset.bstepsize){BUI.step=b.dataset.bstepsize;bRenderInspector();bQuickRefresh();return;}
+  if(b.dataset.bmall){BUI.multi=d.pieces.map(p=>({type:'piece',id:p.id})).concat(d.items.map(i=>({type:'item',id:i.id})));bRenderInspector();bPlanRefresh();bListRefresh();return;}
+  if(b.dataset.bmclear){BUI.multi=[];bRenderInspector();bPlanRefresh();bListRefresh();return;}
+  if(b.dataset.bmstep){BUI.mstep=+b.dataset.bmstep;bRenderInspector();return;}
+  if(b.dataset.bmm||b.dataset.bmrot||b.dataset.bmdel){const objs=(BUI.multi||[]).map(m=>m.type==='piece'?d.pieces.find(q=>q.id===m.id):d.items.find(q=>q.id===m.id)).filter(Boolean);if(!objs.length)return;
+    if(b.dataset.bmdel){const ids=new Set(objs.map(o=>o.id));d.pieces=d.pieces.filter(p=>!ids.has(p.id));d.items=d.items.filter(i=>!ids.has(i.id));const n=ids.size;BUI.multi=[];bcommit(true);toast(`Deleted ${n}. Undo brings them back.`);return;}
+    if(b.dataset.bmm){const st=BUI.mstep||1;const [sx,sy]=b.dataset.bmm.split(',').map(Number);objs.forEach(o=>{o.x=r8(o.x+sx*st);o.y=r8(o.y+sy*st);});bcommit(true);return;}
+    if(b.dataset.bmrot){let x0=1e9,x1=-1e9,y0=1e9,y1=-1e9;objs.forEach(o=>{x0=Math.min(x0,o.x);x1=Math.max(x1,o.x);y0=Math.min(y0,o.y);y1=Math.max(y1,o.y);});const cx=(x0+x1)/2,cy=(y0+y1)/2;
+      objs.forEach(o=>{const dx=o.x-cx,dy=o.y-cy;o.x=r8(cx-dy);o.y=r8(cy+dx);if(o.k)o.rot=((o.rot||0)+90)%360;else if(typeof o.rot==='number')o.rot=(o.rot+90)%180;});bcommit(true);toast('Turned the group 90°.');return;}}
   if(b.dataset.bact==='mirAll'){if(TEACH.allowMirror)mirrorAll(b.dataset.m);return;}
-  if(b.dataset.bpick){BUI.sel={type:b.dataset.bpick,id:b.dataset.id};render();return;}
+  if(b.dataset.bpick){if(BUI.tool==='multi'){BUI.multi=BUI.multi||[];const t=b.dataset.bpick,id=b.dataset.id;if(BUI.multi.some(m=>m.type===t&&m.id===id))BUI.multi=BUI.multi.filter(m=>!(m.type===t&&m.id===id));else BUI.multi.push({type:t,id});bRenderInspector();bPlanRefresh();bListRefresh();return;}BUI.sel={type:b.dataset.bpick,id:b.dataset.id};render();return;}
   if(b.dataset.brm){const t=b.dataset.brm,id=b.dataset.id;if(t==='piece')d.pieces=d.pieces.filter(p=>p.id!==id);else d.items=d.items.filter(i=>i.id!==id);if(BUI.sel&&BUI.sel.id===id)BUI.sel=null;bcommit(true);toast('Removed. Tap Undo to bring it back.');return;}
   if(b.dataset.act==='rotItem'){const it=bSel();it.rot=((it.rot||0)+90)%180;bcommit(true);return;}
   if(b.dataset.bact){const a=b.dataset.bact,p=bSel();
@@ -2051,8 +2076,9 @@ function bPlanInner(opt){const d=BUI.d,B=d.base,sel=opt.export?null:BUI.sel;let 
     else{o+=`<text x="${n2(p.x)}" y="${n2(p.y-1)}" font-size="1.3" font-weight="700" text-anchor="middle" fill="#1f1d1a" ${halo}>#${i} ${esc(SHEETS[p.mat].n.replace(' CDX',''))}</text><text x="${n2(p.x)}" y="${n2(p.y+0.8)}" font-size="1.15" text-anchor="middle" fill="#4a4640" ${halo}>${esc(frac(p.w))} × ${esc(frac(p.l))}${p.cover?' · '+esc(MATS[p.cover].n):''}</text>`;
       if(p.tilt&&p.tilt.p){const lo=p.tilt.low,dir={'u-':[-1,0],'u+':[1,0],'v-':[0,-1],'v+':[0,1]}[lo];const L=Math.min(8,(dir[0]?D.a:D.b)*0.7);const ou=dir[0]?0:Math.min(8,D.a*0.5),ov=dir[0]?Math.min(8,D.b*0.5):0;const [a1,b1]=toWorld(p,-dir[0]*L+ou,-dir[1]*L+ov),[a2,b2]=toWorld(p,dir[0]*L+ou,dir[1]*L+ov);
         o+=`<line x1="${n2(a1)}" y1="${n2(b1)}" x2="${n2(a2)}" y2="${n2(b2)}" stroke="#6b665e" stroke-width="0.3" marker-end="url(#pa)" pointer-events="none"/><text x="${n2((a1+a2)/2)}" y="${n2((b1+b2)/2-0.8)}" font-size="1.1" text-anchor="middle" fill="#4a4640" ${halo}>${pitchTxt(p.tilt.p)}</text>`;}}
-    if(isSel)selO=`<polygon points="${f}" fill="none" stroke="#c4521f" stroke-width="0.55" stroke-dasharray="1.2 0.5" pointer-events="none"/>`;});
-  o+=selO;if(HOOKS.planOverlay&&!opt.export)o+=HOOKS.planOverlay();d.items.forEach(it=>{const isSel=sel&&sel.type==='item'&&sel.id===it.id;o+=itemSymbol(it,isSel);});return o;}
+    if(isSel)selO+=`<polygon points="${f}" fill="none" stroke="#c4521f" stroke-width="0.55" stroke-dasharray="1.2 0.5" pointer-events="none"/>`;
+    if(!opt.export&&BUI.tool==='multi'&&(BUI.multi||[]).some(m=>m.type==='piece'&&m.id===p.id))selO+=`<polygon points="${f}" fill="#1f6fb2" fill-opacity="0.18" stroke="#1f6fb2" stroke-width="0.55" stroke-dasharray="1.2 0.5" pointer-events="none"/>`;});
+  o+=selO;if(HOOKS.planOverlay&&!opt.export)o+=HOOKS.planOverlay();d.items.forEach(it=>{const isSel=sel&&sel.type==='item'&&sel.id===it.id||(!opt.export&&BUI.tool==='multi'&&(BUI.multi||[]).some(m=>m.type==='item'&&m.id===it.id));o+=itemSymbol(it,isSel);});return o;}
 function bPlanRefresh(){const g=document.getElementById('planContent');if(g)g.innerHTML=bPlanInner({});}
 function bHitsAt(x,y){return BUI.d.pieces.filter(p=>!(BUI.hideSheets&&p.k==='sh')&&pInside(p,x,y,-0.3)).sort((a,b)=>{const [au,av]=toLocal(a,x,y),[bu,bv]=toLocal(b,x,y);return topL(b,bu,bv)-topL(a,au,av);});}
 function bSnapMove(p,cx,cy){const d=BUI.d,g=d.grid;let nx=Math.round(cx/g)*g,ny=Math.round(cy/g)*g;const ox=p.x,oy=p.y;p.x=nx;p.y=ny;
@@ -2061,6 +2087,10 @@ function bSnapMove(p,cx,cy){const d=BUI.d,g=d.grid;let nx=Math.round(cx/g)*g,ny=
   p.x=r8(nx+(bx||0));p.y=r8(ny+(by||0));if(isNaN(p.x)){p.x=ox;p.y=oy;}}
 function bBindPlan(){const svg=document.getElementById('plansvg');if(!svg)return;svg.style.touchAction='none';let down=null;
   svg.onpointerdown=e=>{if(e.pointerType==='touch'&&!e.isPrimary)return;BUI.dragging=true;const pt=planPt(e);if(!pt)return;const d=BUI.d;const hitEl=e.target.closest('[data-hit]');
+    if(BUI.tool==='multi'){BUI.multi=BUI.multi||[];let hit=null;if(hitEl&&hitEl.dataset.hit==='item')hit={type:'item',id:hitEl.dataset.id};else{const hs=bHitsAt(pt[0],pt[1]);if(hs.length){const inG=hs.find(h=>BUI.multi.some(m=>m.type==='piece'&&m.id===h.id));hit={type:'piece',id:(inG||hs[0]).id};}}
+      if(!hit)return;const was=BUI.multi.some(m=>m.type===hit.type&&m.id===hit.id);if(!was)BUI.multi.push(hit);
+      const orig=BUI.multi.map(m=>{const o=m.type==='piece'?d.pieces.find(q=>q.id===m.id):d.items.find(q=>q.id===m.id);return o?[m,o,o.x,o.y]:null;}).filter(Boolean);
+      down={kind:'multi',hit,was,orig,pt0:pt,x:e.clientX,y:e.clientY,moved:false};svg.setPointerCapture(e.pointerId);bPlanRefresh();bRenderInspector();bListRefresh();return;}
     if(BUI.tool==='item'){const k=BUI.itemKind;const it=Object.assign({id:uid(),kind:k,x:r8(clamp(pt[0],0,d.base.W)),y:r8(clamp(pt[1],0,d.base.L))},clone(ITEM_DEFAULTS[k]));d.items.push(it);BUI.sel={type:'item',id:it.id};BUI.tool='select';bcommit(true);toast(`${ITEM_KINDS[k].n} placed. Drag to adjust.`);return;}
     if(hitEl&&hitEl.dataset.hit==='item'){const it=d.items.find(i=>i.id===hitEl.dataset.id);if(BUI.tool==='erase'){d.items=d.items.filter(i=>i!==it);bcommit(true);return;}
       BUI.sel={type:'item',id:it.id};down={kind:'item',it,off:[it.x-pt[0],it.y-pt[1]],x:e.clientX,y:e.clientY,moved:false};svg.setPointerCapture(e.pointerId);bRenderInspector();bPlanRefresh();bListRefresh();return;}
@@ -2070,9 +2100,11 @@ function bBindPlan(){const svg=document.getElementById('plansvg');if(!svg)return
     const cur=BUI.sel&&BUI.sel.type==='piece'?hits.find(h=>h.id===BUI.sel.id):null;const p=cur||hits[0];const wasSel=!!cur;
     BUI.sel={type:'piece',id:p.id};down={kind:'piece',p,hits,wasSel,off:[p.x-pt[0],p.y-pt[1]],x:e.clientX,y:e.clientY,moved:false,z0:p.z,before:overlapIds(p)};svg.setPointerCapture(e.pointerId);bPlanRefresh();bRenderInspector();bListRefresh();};
   svg.onpointermove=e=>{if(!down)return;if(!down.moved&&Math.hypot(e.clientX-down.x,e.clientY-down.y)<6)return;down.moved=true;const pt=planPt(e);if(!pt)return;const d=BUI.d;
+    if(down.kind==='multi'){const g=d.grid||1,dx=Math.round((pt[0]-down.pt0[0])/g)*g,dy=Math.round((pt[1]-down.pt0[1])/g)*g;down.orig.forEach(([m,o,x0,y0])=>{o.x=r8(x0+dx);o.y=r8(y0+dy);if(m.type==='item'){o.x=clamp(o.x,0,d.base.W);o.y=clamp(o.y,0,d.base.L);}});bPlanRefresh();return;}
     if(down.kind==='item'){down.it.x=r8(clamp(Math.round((pt[0]+down.off[0])/d.grid)*d.grid,0,d.base.W));down.it.y=r8(clamp(Math.round((pt[1]+down.off[1])/d.grid)*d.grid,0,d.base.L));}
     else bSnapMove(down.p,pt[0]+down.off[0],pt[1]+down.off[1]);bPlanRefresh();};
   const up=e=>{BUI.dragging=false;if(!down)return;const dn=down;down=null;
+    if(dn.kind==='multi'){if(!dn.moved){if(dn.was)BUI.multi=BUI.multi.filter(m=>!(m.type===dn.hit.type&&m.id===dn.hit.id));bPlanRefresh();bRenderInspector();bListRefresh();return;}bcommit(true);toast(`Moved ${BUI.multi.length} together.`);return;}
     if(!dn.moved&&dn.kind==='piece'&&dn.wasSel&&dn.hits.length>1){const i=dn.hits.indexOf(dn.p);const nx=dn.hits[(i+1)%dn.hits.length];BUI.sel={type:'piece',id:nx.id};bPlanRefresh();bRenderInspector();bListRefresh();toast(`Picked ${pLabel(BUI.d,nx)} (underneath).`);return;}
     if(dn.moved){if(dn.kind==='piece'){const fm=fitSheet(dn.p);afterMove(dn.p,dn.before);if(fm)toast(fm);}bcommit(false);}};
   svg.onpointerup=up;svg.onpointercancel=up;}
@@ -2083,9 +2115,9 @@ const BTABS=[['plan','Build'],['3d','3D view'],['cut','Cut list'],['mat','Materi
 function bRenderView(){const v=document.getElementById('view'),d=BUI.d,M=BUI.M;let h='';
   if(UI.tab!=='3d'&&V3.ok&&V3.renderer.domElement.parentNode)V3.renderer.domElement.remove();
   if(!BTABS.some(t=>t[0]===UI.tab))UI.tab='plan';
-  if(UI.tab==='plan'){h+=`<div class="toolbar"><span class="seg" role="group" aria-label="Tool">${[['select','Select / move'],['item','Add detail'],['erase','Erase']].map(([k,l])=>`<button type="button" data-btool="${k}" class="${BUI.tool===k?'on':''}">${l}</button>`).join('')}</span><span class="seg"><button type="button" data-bhide="1" class="${BUI.hideSheets?'on':''}">Hide sheets</button></span></div>`;
+  if(UI.tab==='plan'){h+=`<div class="toolbar"><span class="seg" role="group" aria-label="Tool">${[['select','Select / move'],['multi','Select several'],['item','Add detail'],['erase','Erase']].map(([k,l])=>`<button type="button" data-btool="${k}" class="${BUI.tool===k?'on':''}">${l}</button>`).join('')}</span><span class="seg"><button type="button" data-bhide="1" class="${BUI.hideSheets?'on':''}">Hide sheets</button></span></div>`;
     if(BUI.tool==='item')h+=`<div class="palette">${Object.entries(ITEM_KINDS).map(([k,v])=>`<button type="button" data-bkind="${k}" class="${BUI.itemKind===k?'on':''}">${esc(v.n)}</button>`).join('')}</div>`;
-    h+=`<div class="viewbar"><span class="hint">${BUI.tool==='item'?`Tap where the ${ITEM_KINDS[BUI.itemKind].n.toLowerCase()} goes.`:BUI.tool==='erase'?'Tap a piece or detail to remove it. Undo brings it back.':'Top view. Drag a piece to move it: it snaps to the grid and to the edges of other pieces, then settles onto whatever is under it. Tap the same spot again to pick the piece underneath.'}</span></div>`;
+    h+=`<div class="viewbar"><span class="hint">${BUI.tool==='item'?`Tap where the ${ITEM_KINDS[BUI.itemKind].n.toLowerCase()} goes.`:BUI.tool==='erase'?'Tap a piece or detail to remove it. Undo brings it back.':BUI.tool==='multi'?'Tap pieces and details to add them to the group (tap again to take one out). Drag any of them to move the whole group, or use the arrows on the left.':'Top view. Drag a piece to move it: it snaps to the grid and to the edges of other pieces, then settles onto whatever is under it. Tap the same spot again to pick the piece underneath.'}</span></div>`;
     h+=`<div class="svgwrap plan" id="planwrap">${bPlanSVG({})}</div><div class="legend"><span><i style="background:${PIECE_COL.lum}"></i>Board</span><span><i style="background:${PIECE_COL.sh}"></i>Sheet</span><span><i class="dash"></i>Arrow points downhill</span></div>`;}
   else if(UI.tab==='3d'){h+=`<div class="toolbar"><span class="seg"><button type="button" id="v3spin" class="${V3.spin?'on':''}">360° spin</button><button type="button" id="v3move" class="${V3.move?'on':''}">Move pieces</button><button type="button" data-bhide="1" class="${BUI.hideSheets?'on':''}">Hide sheets</button></span><span class="seg"><button type="button" data-v3="iso">3D</button><button type="button" data-v3="top">Top</button><button type="button" data-v3="front">Front</button><button type="button" data-v3="side">Side</button></span></div><div class="svgwrap" id="v3wrap"></div><p class="hint">${V3.move?'Drag a piece or detail to slide it. It settles onto the wood under it when you let go. Turn off “Move pieces” to orbit.':'Tap a piece to select it. Drag to orbit, pinch or scroll to zoom.'}</p>`;}
   else if(UI.tab==='cut'){h+=`<p class="hint">Every piece to cut, grouped when they are the same. Lengths are to the nearest 1/8″.</p><h3>Lumber</h3>`+table(['Pieces','Qty','Length','Ft-in','Lumber','Cut'],cutRows(M),[1,2,3])+`<h3>Sheets</h3>`+table(['Pieces','Qty','Cut size','Sheet','Notes'],sheetRows(M),[1,2]);
@@ -2100,7 +2132,7 @@ function bRenderView(){const v=document.getElementById('view'),d=BUI.d,M=BUI.M;l
 function placeRows(d){return d.pieces.map((p,i)=>[String(i+1),pName(p),`${layTxt(p)}${p.rot%180?', turned '+p.rot+'°':''}`,`${frac(p.x)}, ${frac(p.y)}`,frac(p.z),[cutTxt(p),p.k==='sh'&&p.tilt&&p.tilt.p?`sloped ${pitchTxt(p.tilt.p)}, low side ${SIDE_NAMES[sideWorld(p,p.tilt.low)]}`:'',p.cover?'covered with '+MATS[p.cover].n:''].filter(Boolean).join('; ')]);}
 function bOnViewClick(e){const b=e.target.closest('button');if(!b)return false;
   if(b.dataset.bact||b.dataset.bstepsize){bOnControl(e);return true;}
-  if(b.dataset.btool){BUI.tool=b.dataset.btool;bRenderView();return true;}
+  if(b.dataset.btool){BUI.tool=b.dataset.btool;if(BUI.tool!=='multi')BUI.multi=[];else BUI.sel=null;bRenderView();bRenderInspector();return true;}
   if(b.dataset.bkind){BUI.itemKind=b.dataset.bkind;bRenderView();return true;}
   if(b.dataset.bhide){BUI.hideSheets=!BUI.hideSheets;if(UI.tab==='3d'){b.classList.toggle('on',BUI.hideSheets);v3build();}else bRenderView();return true;}
   return false;}
@@ -2308,6 +2340,12 @@ function listHtml(){const d=UI.d,s=UI.sel;let h='';
   return h||'<p class="hint">Nothing yet. Use Draw roof on the Plan tab to start.</p>';}
 function renderInspector(){if(MODE==='build')return bRenderInspector();
   const el=document.getElementById('inspector');if(!el)return;const s=UI.sel,o=selObj();
+  if(PLAN.tool==='multi'){const n=(UI.multi||[]).length,st=UI.mstep||UI.d.grid||1;
+    el.innerHTML=`<div class="insp"><div class="insphead"><b>${n?n+' selected':'Select several'}</b><span class="hint">${n?'Move or delete them together.':'Tap roofs, walls and details on the plan.'}</span></div>
+      <div class="btnrow"><button type="button" class="btn light" data-mmall="1">Select everything</button>${n?'<button type="button" class="btn light" data-mmclear="1">Clear</button>':''}</div>
+      ${n?`<div class="subhead">Move together</div><div class="row"><span class="lab">Each tap</span><span class="seg">${[[1,'1″'],[3,'3″'],[6,'6″'],[12,'12″']].map(([v,t])=>`<button type="button" data-mmstep="${v}" class="${st===v?'on':''}">${t}</button>`).join('')}</span></div>
+      <div class="btnrow"><button type="button" class="btn light" data-mm="-1,0">← Left</button><button type="button" class="btn light" data-mm="1,0">Right →</button><button type="button" class="btn light" data-mm="0,-1">↑ Back</button><button type="button" class="btn light" data-mm="0,1">↓ Front</button></div>
+      <div class="btnrow"><button type="button" class="btn danger" data-mmdel="1">Delete ${n}</button></div>`:''}</div>`;return;}
   if(!o){el.innerHTML=`<div class="insp empty"><b>Nothing selected</b><span class="hint">Tap a roof area, wall or item on the plan, or pick it from the list below.</span></div>`;return;}
   let h='<div class="insp">';
   if(s.type==='area'){const a=o,A=UI.M.areas.find(x=>x.a.id===a.id),sys=sysOf(a),rect=isRect(a.pts);
@@ -2420,6 +2458,13 @@ function mergeWalls(id,only){const d=UI.d;const w=d.walls.find(w=>w.id===id);if(
 // ---------- events: left panel + inspector ----------
 function onControl(e){if(MODE==='build')return bOnControl(e);
   const b=e.target.closest('button');
+  if(b&&(b.dataset.mmall||b.dataset.mmclear||b.dataset.mmstep||b.dataset.mm||b.dataset.mmdel)){const d=UI.d;
+    if(b.dataset.mmall){UI.multi=d.areas.map(a=>({type:'area',id:a.id})).concat(d.walls.map(w=>({type:'wall',id:w.id})),d.items.map(i=>({type:'item',id:i.id})));renderInspector();planRefresh();return;}
+    if(b.dataset.mmclear){UI.multi=[];renderInspector();planRefresh();return;}
+    if(b.dataset.mmstep){UI.mstep=+b.dataset.mmstep;renderInspector();return;}
+    const objs=(UI.multi||[]).map(m=>[m,m.type==='area'?d.areas.find(a=>a.id===m.id):m.type==='wall'?d.walls.find(w=>w.id===m.id):d.items.find(i=>i.id===m.id)]).filter(x=>x[1]);
+    if(b.dataset.mmdel){const ids=new Set(objs.map(x=>x[1].id));d.areas=d.areas.filter(a=>!ids.has(a.id));d.walls=d.walls.filter(w=>!ids.has(w.id));d.items=d.items.filter(i=>!ids.has(i.id));UI.multi=[];UI.sel=null;commit(true);toast(`Deleted ${ids.size}. Undo brings them back.`);return;}
+    if(b.dataset.mm){const st=UI.mstep||d.grid||1;const [sx,sy]=b.dataset.mm.split(',').map(Number);const dx=sx*st,dy=sy*st;objs.forEach(([m,o])=>{if(m.type==='area')o.pts=o.pts.map(p=>[p[0]+dx,p[1]+dy]);else if(m.type==='wall'){o.a=[o.a[0]+dx,o.a[1]+dy];o.b=[o.b[0]+dx,o.b[1]+dy];}else{o.x=clamp(o.x+dx,0,d.base.W);o.y=clamp(o.y+dy,0,d.base.L);}});commit(true);return;}}
   if(b&&b.dataset.pick){UI.sel={type:b.dataset.pick,id:b.dataset.id};render();return;}
   if(b&&b.dataset.mergearea){mergeAreas(UI.sel.id,b.dataset.mergearea);return;}
   if(b&&b.dataset.joinarea){joinAreas(UI.sel.id,b.dataset.joinarea);return;}
@@ -2477,7 +2522,7 @@ function renderView(){if(MODE==='build')return bRenderView();
   if(UI.tab!=='3d'&&V3.ok&&V3.renderer.domElement.parentNode)V3.renderer.domElement.remove();
   if(UI.tab==='plan'){
     const t=PLAN.tool;
-    h+=`<div class="toolbar"><span class="seg" role="group" aria-label="Tool">${[['select','Select / move'],['area','Draw roof'],['wall','Draw wall'],['item','Add detail'],['merge','Merge'],['erase','Erase']].map(([k,l])=>`<button type="button" data-tool="${k}" class="${t===k?'on':''}">${l}</button>`).join('')}</span></div>`;
+    h+=`<div class="toolbar"><span class="seg" role="group" aria-label="Tool">${[['select','Select / move'],['multi','Select several'],['area','Draw roof'],['wall','Draw wall'],['item','Add detail'],['merge','Merge'],['erase','Erase']].map(([k,l])=>`<button type="button" data-tool="${k}" class="${t===k?'on':''}">${l}</button>`).join('')}</span></div>`;
     if(t==='item')h+=`<div class="palette">${Object.entries(ITEM_KINDS).map(([k,v])=>`<button type="button" data-kind="${k}" class="${PLAN.itemKind===k?'on':''}">${esc(v.n)}</button>`).join('')}</div>`;
     h+=`<div class="viewbar"><span class="hint" id="toolhint"></span><span id="toolbtns"></span></div>`;
     h+=`<div class="svgwrap plan" id="planwrap">${planSVG(UI.X,M)}</div>`;
@@ -2535,6 +2580,7 @@ function bindCost(v,d){const cm=()=>MODE==='build'?bcm():cm();document.getElemen
 function renderToolHint(){
   const el=document.getElementById('toolhint'),bt=document.getElementById('toolbtns');if(!el)return;let h='',b='';
   if(PLAN.tool==='select')h='Tap a roof, wall or detail to edit it; rotate it from the panel on the left. Drag corner dots to reshape; tap a numbered edge dot to add a corner there. Drag details to move them. Tap a selected roof again and drag to move it.';
+  if(PLAN.tool==='multi')h='Tap roofs, walls and details to add them to the group (tap again to take one out). Drag any of them to move the whole group, or use the arrows on the left.';
   if(PLAN.tool==='merge')h=PLAN.mergeFirst?`Now tap the ${PLAN.mergeFirst.type==='area'?'roof':'wall'} to join to it.`:'Tap a roof (or wall), then tap the one beside it to merge or join them. Roofs must touch along an edge.';
   if(PLAN.tool==='erase')h='Tap any roof, wall or detail to remove it. Tap a corner dot to remove just that corner. Undo brings things back.';
   if(PLAN.tool==='area'){h=PLAN.draft.length?`${PLAN.draft.length} point${PLAN.draft.length>1?'s':''}. Tap the next corner; tap the first point (orange) to close.`:'Tap each corner of the roof outline. Points snap to the grid and to other corners.';
@@ -2545,7 +2591,7 @@ function renderToolHint(){
 }
 function onViewClick(e){
   const b=e.target.closest('button');if(!b)return;if(MODE==='build'&&bOnViewClick(e))return;
-  if(b.dataset.tool){PLAN.tool=b.dataset.tool;PLAN.mergeFirst=null;PLAN.draft=[];PLAN.wallStart=null;PLAN.hover=null;renderView();return;}
+  if(b.dataset.tool){PLAN.tool=b.dataset.tool;PLAN.mergeFirst=null;PLAN.draft=[];PLAN.wallStart=null;PLAN.hover=null;if(PLAN.tool!=='multi')UI.multi=[];else UI.sel=null;renderView();renderInspector();return;}
   if(b.dataset.kind){PLAN.itemKind=b.dataset.kind;renderView();return;}
   if(b.dataset.draft){const k=b.dataset.draft;if(k==='finish')finishArea();if(k==='undo'){PLAN.draft.pop();planRefresh();renderToolHint();}if(k==='cancel'){PLAN.draft=[];PLAN.tool='select';renderView();}if(k==='walldone'){PLAN.wallStart=null;PLAN.tool='select';renderView();}return;}
   if(b.id==='v3spin'){V3.spin=!V3.spin;syncSpinBtn();V3.dirty=true;return;}
