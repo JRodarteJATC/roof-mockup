@@ -1215,7 +1215,7 @@ function constructionSteps(d,M){
 
 // ================= Instructor menu (hidden) and groups =================
 const TSTORE='roof-studio-teacher',GSTORE='roof-studio-group';
-const TEACH=Object.assign({pin:'27112908',allowCopy:true,groups:6},(()=>{try{return JSON.parse(localStorage.getItem(TSTORE)||'{}');}catch(e){return {};}})());if(!TEACH.copyDefault2){TEACH.allowCopy=true;TEACH.copyDefault2=1;try{localStorage.setItem(TSTORE,JSON.stringify(TEACH));}catch(e){}}
+const TEACH=Object.assign({pin:'27112908',allowCopy:false,allowMirror:false,groups:6},(()=>{try{return JSON.parse(localStorage.getItem(TSTORE)||'{}');}catch(e){return {};}})());if(!TEACH.lockCM3){TEACH.allowCopy=false;TEACH.allowMirror=false;TEACH.lockCM3=1;try{localStorage.setItem(TSTORE,JSON.stringify(TEACH));}catch(e){}}
 function tSave(){try{localStorage.setItem(TSTORE,JSON.stringify(TEACH));}catch(e){}}
 const GROUP=Object.assign({g:0,names:['','','','']},(()=>{try{return JSON.parse(localStorage.getItem(GSTORE)||'{}');}catch(e){return {};}})());
 function gSave(){try{localStorage.setItem(GSTORE,JSON.stringify(GROUP));}catch(e){}}
@@ -1245,6 +1245,8 @@ function renderTeacher(){const b=document.getElementById('tBody');
     <p class="hint">The app always opens in Build mode. Easy mode lasts until the app is closed or reloaded.</p>
     <div class="subhead">Copying wood in Build mode</div><div class="btnrow"><button type="button" class="btn ${TEACH.allowCopy?'':'light'}" data-t="copyOn">Allow copy</button><button type="button" class="btn ${TEACH.allowCopy?'light':''}" data-t="copyOff">No copy</button></div>
     <p class="hint">When allowed, a selected piece shows Copy buttons (beside it, or 12″, 16″ or 24″ on center). This setting stays on this iPad.</p>
+    <div class="subhead">Mirror in Build mode</div><div class="btnrow"><button type="button" class="btn ${TEACH.allowMirror?'':'light'}" data-t="mirOn">Allow mirror</button><button type="button" class="btn ${TEACH.allowMirror?'light':''}" data-t="mirOff">No mirror</button></div>
+    <p class="hint">When allowed, a selected piece or detail shows Mirror buttons, and the left panel can mirror the whole build to the other side of the Z wall. This setting stays on this iPad.</p>
     <div class="subhead">Groups</div><div class="btnrow">${[3,4,5,6].map(n=>`<button type="button" class="btn ${TEACH.groups===n?'':'light'}" data-t="groups" data-n="${n}">${n} groups</button>`).join('')}</div>
     <div class="btnrow"><button type="button" class="btn light" data-t="group">Change this iPad's group</button></div>
     ${HOOKS.teacherExtra?HOOKS.teacherExtra():''}
@@ -1258,6 +1260,7 @@ function bindTeacher(){const m=document.getElementById('tModal');
     if(t==='convert'){if(convertToEasy())m.hidden=true;return;}
     if(t==='build'||t==='easy'){setMode(t);m.hidden=true;return;}
     if(t==='copyOn'||t==='copyOff'){TEACH.allowCopy=t==='copyOn';tSave();renderTeacher();if(MODE==='build')bRenderInspector();return;}
+    if(t==='mirOn'||t==='mirOff'){TEACH.allowMirror=t==='mirOn';tSave();renderTeacher();if(MODE==='build')bRenderLeft();return;}
     if(t==='groups'){TEACH.groups=+b.dataset.n;tSave();renderTeacher();return;}
     if(t==='group'){m.hidden=true;if(HOOKS.group)HOOKS.group();else openGroup(false);return;}
     if(t==='pin'){const v=document.getElementById('tNewPin').value.trim();if(!/^\d{4,12}$/.test(v)){toast('Use 4 to 12 digits.');return;}TEACH.pin=v;tSave();toast('PIN changed. Write it down.');renderTeacher();return;}
@@ -1809,6 +1812,21 @@ function addPiece(){const A=BUI.add,d=BUI.d;let p;
 function copyPiece(id,dist){const d=BUI.d,p=d.pieces.find(q=>q.id===id);if(!p)return;const c=clone(p);c.id=uid();const D=pDims(p);
   const off=dist?dist:2*D.b+0.5;const [ux,uy]=pAx(p);c.x=r8(p.x-uy*off);c.y=r8(p.y+ux*off);if(c.k==='sh')c.z=p.z;
   d.pieces.splice(d.pieces.indexOf(p)+1,0,c);BUI.sel={type:'piece',id:c.id};bcommit(true);toast(dist?`Copied ${frac(dist)} over.`:'Copied next to it.');}
+function mirPos(m,x,y){const W=BUI.d.base.W,L=BUI.d.base.L;return m==='lr'?[W-x,y]:m==='fb'?[x,L-y]:[W-x,L-y];}
+function mirRot(m,r){r=r||0;return ((m==='lr'?180-r:m==='fb'?-r:r+180)%360+360)%360;}
+function mirPiece(p,m){const c=clone(p);c.id=uid();const q=mirPos(m,p.x,p.y);c.x=r8(q[0]);c.y=r8(q[1]);c.rot=mirRot(m,p.rot);return c;}
+function mirItem(it,m){const c=clone(it);c.id=uid();const q=mirPos(m,it.x,it.y);c.x=r8(q[0]);c.y=r8(q[1]);if(typeof it.rot==='number')c.rot=mirRot(m,it.rot)%180;return c;}
+function sameSpot(a,b){if(a.k!==b.k||a.mat!==b.mat||a.lay!==b.lay)return false;if(Math.abs(a.x-b.x)>0.5||Math.abs(a.y-b.y)>0.5||Math.abs((a.z||0)-(b.z||0))>0.5)return false;
+  const ra=((a.rot||0)%180+180)%180,rb=((b.rot||0)%180+180)%180;if(Math.min(Math.abs(ra-rb),180-Math.abs(ra-rb))>1)return false;
+  return a.k==='lum'?Math.abs(a.len-b.len)<0.2:(Math.abs(a.w-b.w)<0.2&&Math.abs(a.l-b.l)<0.2)||(Math.abs(a.w-b.l)<0.2&&Math.abs(a.l-b.w)<0.2);}
+function mirrorSel(m){const d=BUI.d,s=BUI.sel,o=bSel();if(!o)return;
+  if(s.type==='item'){const c=mirItem(o,m);d.items.push(c);BUI.sel={type:'item',id:c.id};}
+  else{const c=mirPiece(o,m);d.pieces.push(c);BUI.sel={type:'piece',id:c.id};}
+  bcommit(true);toast('Mirrored copy added. Undo takes it back.');}
+function mirrorAll(m){const d=BUI.d;const src=d.pieces.slice();let n=0,k=0;
+  src.forEach(p=>{const c=mirPiece(p,m);if(d.pieces.some(q=>sameSpot(q,c))){k++;return;}d.pieces.push(c);n++;});
+  d.items.slice().forEach(it=>{const c=mirItem(it,m);if(d.items.some(q=>q.kind===c.kind&&Math.abs(q.x-c.x)<0.5&&Math.abs(q.y-c.y)<0.5))return;d.items.push(c);n++;});
+  BUI.sel=null;bcommit(true);toast(n?`Mirrored ${n} piece${n>1?'s':''} and details${k?`; ${k} already matched`:''}. Undo takes it back.`:'Nothing to mirror: both sides already match.');}
 function setTaperSlope(p,dir){const hi=Math.max(p.taper.h0,p.taper.h1);const cur=pitchOf(p);let i=SLOPES.findIndex(x=>x>=cur-1e-6);if(i<0)i=SLOPES.length-1;
   if(dir>0&&SLOPES[i]<=cur+1e-6)i++;else if(dir<0)i--;i=clamp(i,1,SLOPES.length-1);const s=SLOPES[i];let lo=r8(hi-p.len*s/12);
   if(lo<0.25){toast(`At ${pitchTxt(s)} this ${frac(p.len)} board would end at ${frac(Math.max(0,lo))}. Use a taller board or a shorter piece.`);return false;}
@@ -1836,6 +1854,7 @@ function bRenderLeft(){const el=document.getElementById('left');const sc=el.scro
     ${stepper('d','base.W','Base width',6,24,96,ftin)}${stepper('d','base.L','Base length',6,24,144,ftin)}
     ${seg('d','base.given','Base',[[true,'Provided'],[false,'Students build it']])}
     ${seg('d','board','Boards you buy',[[96,'8′'],[120,'10′'],[144,'12′'],[192,'16′']])}${seg('d','grid','Snap',[[0.125,'1/8″'],[0.5,'1/2″'],[1,'1″'],[3,'3″']])}</details>`;
+  if(TEACH.allowMirror)h+=`<div class="sec"><div class="subhead">Mirror the whole build</div><div class="btnrow"><button type="button" class="btn light" data-bact="mirAll" data-m="rot180">Opposite corner</button><button type="button" class="btn light" data-bact="mirAll" data-m="lr">Left ↔ right</button><button type="button" class="btn light" data-bact="mirAll" data-m="fb">Back ↔ front</button></div><p class="hint">Copies every piece and detail to the other side. Pieces that already match on both sides are not doubled. Undo takes it back.</p></div>`;
   h+=`<div class="sec list"><div class="subhead">Pieces (${d.pieces.length})</div>${bListHtml()}</div>`;
   el.innerHTML=h;el.scrollTop=sc;bRenderInspector();}
 function lenField(obj,k,label){const v=getK(target(obj),k);return `<div class="row"><span class="lab">${esc(label)}</span><span class="stepper"><button type="button" data-obj="${obj}" data-step="${k}" data-d="-0.125" data-min="0.25" data-max="192" aria-label="Shorter">−</button><input type="text" inputmode="decimal" data-obj="${obj}" data-blen="${k}" value="${esc(typeof v==='number'?frac(v,''):v)}" aria-label="${esc(label)}" autocomplete="off"><button type="button" data-obj="${obj}" data-step="${k}" data-d="0.125" data-min="0.25" data-max="192" aria-label="Longer">+</button></span></div>`;}
@@ -1848,6 +1867,7 @@ function bRenderInspector(){const el=document.getElementById('inspector');if(!el
   let h='<div class="insp">';
   if(BUI.sel.type==='item'){const it=o;h+=`<div class="insphead"><b>${ITEM_KINDS[it.kind].n}</b><span class="hint">${(()=>{const S=surfaceAt(d,it.x,it.y);return S.p?`on ${esc(pLabel(d,S.p))}`:'not on any wood';})()}</span></div>`;
     h+=itemSizeCtl(it)+nudgeHtml(it,true)+stepper('item','x','From left edge',d.grid,0,d.base.W)+stepper('item','y','From back edge',d.grid,0,d.base.L);
+    if(TEACH.allowMirror)h+=`<div class="subhead">Mirror</div><div class="btnrow"><button type="button" class="btn light" data-bact="mirror" data-m="rot180">Opposite corner</button><button type="button" class="btn light" data-bact="mirror" data-m="lr">Left ↔ right</button><button type="button" class="btn light" data-bact="mirror" data-m="fb">Back ↔ front</button></div><p class="hint">Adds a mirrored copy on the other side.</p>`;
     h+=`<div class="btnrow"><button type="button" class="btn danger" data-bact="del">Delete</button></div></div>`;el.innerHTML=h;return;}
   const p=o;h+=`<div class="insphead"><b>${esc(pLabel(d,p))}</b><span class="hint">${layTxt(p)} · bottom ${frac(p.z)} up · top ${frac(pTopMax(p))}</span></div>`;
   if(p.k==='lum'){h+=seg('p','mat','Lumber',[['2x4','2×4'],['2x6','2×6'],['2x8','2×8']])+lenField('p','len','Length')+seg('p','lay','How it sits',[['flat','Flat'],['edge','On edge'],['up','Standing']]);}
@@ -1868,9 +1888,11 @@ function bRenderInspector(){const el=document.getElementById('inspector');if(!el
     h+=`<div class="btnrow"><button type="button" class="btn light" data-bact="match">Match the slope of the wood under it</button></div>`;
     h+=select('p','cover','Roofing on top',[['','None']].concat(MAT_ORDER.map(k=>[k,MATS[k].n])));}
   if(TEACH.allowCopy)h+=`<div class="subhead">Copy</div><div class="btnrow"><button type="button" class="btn light" data-bact="copy">Copy beside it</button><button type="button" class="btn light" data-bact="copy" data-dist="12">12″ o.c.</button><button type="button" class="btn light" data-bact="copy" data-dist="16">16″ o.c.</button><button type="button" class="btn light" data-bact="copy" data-dist="24">24″ o.c.</button></div>`;
+  if(TEACH.allowMirror)h+=`<div class="subhead">Mirror</div><div class="btnrow"><button type="button" class="btn light" data-bact="mirror" data-m="rot180">Opposite corner</button><button type="button" class="btn light" data-bact="mirror" data-m="lr">Left ↔ right</button><button type="button" class="btn light" data-bact="mirror" data-m="fb">Back ↔ front</button></div><p class="hint">Adds a mirrored copy on the other side.</p>`;
   h+=`<div class="btnrow"><button type="button" class="btn danger" data-bact="del">Delete</button></div></div>`;el.innerHTML=h;}
 function bOnControl(e){const b=e.target.closest('button');if(!b)return;const d=BUI.d;{const p0=bSel();if(p0&&p0.k==='lum'&&!p0.tilt)p0.tilt={p:0,low:'u+'};}
   if(b.dataset.bstepsize){BUI.step=b.dataset.bstepsize;bRenderInspector();bQuickRefresh();return;}
+  if(b.dataset.bact==='mirAll'){if(TEACH.allowMirror)mirrorAll(b.dataset.m);return;}
   if(b.dataset.bpick){BUI.sel={type:b.dataset.bpick,id:b.dataset.id};render();return;}
   if(b.dataset.brm){const t=b.dataset.brm,id=b.dataset.id;if(t==='piece')d.pieces=d.pieces.filter(p=>p.id!==id);else d.items=d.items.filter(i=>i.id!==id);if(BUI.sel&&BUI.sel.id===id)BUI.sel=null;bcommit(true);toast('Removed. Tap Undo to bring it back.');return;}
   if(b.dataset.act==='rotItem'){const it=bSel();it.rot=((it.rot||0)+90)%180;bcommit(true);return;}
@@ -1886,6 +1908,7 @@ function bOnControl(e){const b=e.target.closest('button');if(!b)return;const d=B
     if(a==='inudge'){const dz=+b.dataset.dz;p.dz=dz===0?0:r8(clamp((p.dz||0)+dz,-6,24));bcommit(true);return;}
     if(a==='layer'){moveLayer(p,b.dataset.to);bcommit(true);toast({top:'Moved to the top of the stack.',bottom:'Moved to the bottom of the stack.',up:'Moved up one layer.',down:'Moved down one layer.'}[b.dataset.to]);return;}
     if(a==='copy'){copyPiece(p.id,+b.dataset.dist||0);return;}
+    if(a==='mirror'){if(!TEACH.allowMirror)return;mirrorSel(b.dataset.m);return;}
     if(a==='flip'){const t=p.taper.h0;p.taper.h0=p.taper.h1;p.taper.h1=t;bcommit(true);return;}
     if(a==='slope'){if(setTaperSlope(p,+b.dataset.dir))bcommit(true);return;}
     if(a==='match'){matchSlope(p);return;}
