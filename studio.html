@@ -1383,7 +1383,7 @@ function bindPlan(){
       if(PLAN.draft.length>=3&&dist(p,PLAN.draft[0])<0.01){finishArea();return;}
       if(!PLAN.draft.length||dist(p,PLAN.draft[PLAN.draft.length-1])>0.01)PLAN.draft.push(p);planRefresh();renderToolHint();e.preventDefault();return;}
     if(PLAN.tool==='wall'){const p=snapPt(p0);
-      if(!PLAN.wallStart){PLAN.wallStart=p;}else if(dist(p,PLAN.wallStart)>1){d.walls.push({id:uid(),a:PLAN.wallStart,b:p,H:14,frame:'2x4',sheath:'ply12',sides:2,mir:!!(d.mirror&&d.mirror.on)});PLAN.wallStart=p;commit(false);}
+      if(!PLAN.wallStart){PLAN.wallStart=p;}else if(dist(p,PLAN.wallStart)>1){d.walls.push({id:uid(),a:PLAN.wallStart,b:p,H:14,frame:d.woodWall||'2x4',sheath:'ply12',sides:2,mir:!!(d.mirror&&d.mirror.on)});PLAN.wallStart=p;commit(false);}
       planRefresh();renderToolHint();e.preventDefault();return;}
     if(PLAN.tool==='item'){const p=snapPt(p0);const it=Object.assign({id:uid(),kind:PLAN.itemKind,x:p[0],y:p[1],mir:!!(d.mirror&&d.mirror.on)},clone(ITEM_DEFAULTS[PLAN.itemKind]));
       if(it.kind==='scupper'||it.kind==='oscupper'){let best=null,bd=1e9;d.walls.forEach(w=>{const dd=segDist(p[0],p[1],w.a,w.b);if(dd<bd){bd=dd;best=w;}});if(best&&bd<10){const dx=best.b[0]-best.a[0],dy=best.b[1]-best.a[1],L2=dx*dx+dy*dy,t=clamp(((p[0]-best.a[0])*dx+(p[1]-best.a[1])*dy)/L2,0,1);it.x=best.a[0]+t*dx;it.y=best.a[1]+t*dy;}}
@@ -1444,7 +1444,7 @@ function bindPlan(){
 }
 function finishArea(){
   if(PLAN.draft.length<3)return;
-  const a=newArea(PLAN.draft.map(p=>p.slice()));a.name=`Roof ${UI.d.areas.length+1}`;a.mir=!!(UI.d.mirror&&UI.d.mirror.on);
+  const a=newArea(PLAN.draft.map(p=>p.slice()));a.name=`Roof ${UI.d.areas.length+1}`;if(UI.d.woodRafter)a.rafter=UI.d.woodRafter;if(UI.d.woodDeck)a.deck=UI.d.woodDeck;a.mir=!!(UI.d.mirror&&UI.d.mirror.on);
   UI.d.areas.push(a);PLAN.draft=[];PLAN.hover=null;UI.sel={type:'area',id:a.id};PLAN.tool='select';commit(true);
 }
 
@@ -2150,6 +2150,18 @@ const open={Project:true,Base:false,Fasteners:false,More:false};
 function renderLeft(){if(MODE==='build')return bRenderLeft();
   const el=document.getElementById('left');const sc=el.scrollTop;const d=UI.d;
   let h=`<div id="inspector"></div>`;
+  if(!d.woodRafter)d.woodRafter='2x4';if(!d.woodDeck)d.woodDeck='ply12';if(!d.woodWall)d.woodWall='2x4';
+  {const t=UI.tab==='plan'?PLAN.tool:'';
+  h+=`<div class="sec addez"><div class="subhead">Add to the mockup</div>
+    <div class="btnrow"><button type="button" class="btn ${t==='area'?'':'light'}" data-act="ezTool" data-v="area">Draw roof</button><button type="button" class="btn ${t==='wall'?'':'light'}" data-act="ezTool" data-v="wall">Draw wall</button><button type="button" class="btn ${t==='select'?'':'light'}" data-act="ezTool" data-v="select">Select / move</button></div>
+    <div class="subhead">Details</div><div class="btnrow">${Object.entries(ITEM_KINDS).map(([k,v])=>`<button type="button" class="btn ${t==='item'&&PLAN.itemKind===k?'':'light'}" data-act="ezItem" data-v="${k}">${esc(v.n)}</button>`).join('')}</div>
+    <p class="hint">Tap a detail, then tap the plan where it goes.</p>
+    <div class="subhead">Wood</div>
+    ${seg('d','woodRafter','Roof framing (rafters or sleepers)',[['2x4','2×4'],['2x6','2×6'],['2x8','2×8']])}
+    ${select('d','woodDeck','Roof deck',Object.entries(SHEETS).map(([k,v])=>[k,v.n]))}
+    ${seg('d','woodWall','Wall framing',[['2x4','2×4'],['2x6','2×6']])}
+    <div class="btnrow"><button type="button" class="btn light" data-act="ezWoodAll">Use this wood on everything drawn</button></div>
+    <p class="hint">New roofs and walls use this wood. To change one roof or wall, select it.</p></div>`;}
   h+=`<details class="sec" data-sec="Project" ${open.Project?'open':''}><summary>Project</summary>${text('d','name','Design name')}<p class="hint">${esc(groupLine())}. Tap the Group button at the top to change names.</p></details>`;
   h+=`<details class="sec" data-sec="Base" ${open.Base?'open':''}><summary>Base, wood and grid</summary>
     ${stepper('d','base.W','Base width',6,24,96,ftin)}${stepper('d','base.L','Base length',6,24,144,ftin)}
@@ -2298,6 +2310,9 @@ function onControl(e){if(MODE==='build')return bOnControl(e);
   if(b&&b.dataset.rot){const s=UI.sel;if(s&&s.type==='area')rotateArea(s.id,+b.dataset.rot);else if(s&&s.type==='wall')rotateWall(s.id,+b.dataset.rot);return;}
   if(b&&b.dataset.rm){const t=b.dataset.rm,id=b.dataset.id,d=UI.d;if(t==='area')d.areas=d.areas.filter(a=>a.id!==id);if(t==='wall')d.walls=d.walls.filter(w=>w.id!==id);if(t==='item')d.items=d.items.filter(i=>i.id!==id);if(UI.sel&&UI.sel.id===id)UI.sel=null;commit(true);toast('Removed. Tap Undo to bring it back.');return;}
   if(b&&b.dataset.act){const s=UI.sel,d=UI.d;
+    if(b.dataset.act==='ezTool'){UI.tab='plan';PLAN.tool=b.dataset.v;PLAN.draft=[];PLAN.wallStart=null;PLAN.mergeFirst=null;PLAN.hover=null;render();toast(b.dataset.v==='area'?'Tap each corner of the roof on the plan.':b.dataset.v==='wall'?'Tap where the wall starts on the plan.':'Tap a roof, wall or detail to edit it.');return;}
+    if(b.dataset.act==='ezItem'){UI.tab='plan';PLAN.tool='item';PLAN.itemKind=b.dataset.v;PLAN.draft=[];PLAN.wallStart=null;render();toast(`Tap the plan where the ${ITEM_KINDS[b.dataset.v].n.toLowerCase()} goes.`);return;}
+    if(b.dataset.act==='ezWoodAll'){d.areas.forEach(a=>{a.rafter=d.woodRafter||'2x4';a.deck=d.woodDeck||'ply12';});d.walls.forEach(w=>{w.frame=d.woodWall||'2x4';});commit(true);toast('Wood updated on every roof and wall.');return;}
     if(b.dataset.act==='del'){if(s.type==='area')d.areas=d.areas.filter(a=>a.id!==s.id);if(s.type==='wall')d.walls=d.walls.filter(w=>w.id!==s.id);if(s.type==='item')d.items=d.items.filter(i=>i.id!==s.id);UI.sel=null;commit(true);}
     if(b.dataset.act==='inudge'){const it=selObj();const dz=+b.dataset.dz;it.dz=dz===0?0:r8(clamp((it.dz||0)+dz,-6,24));commit(true);return;}
     if(b.dataset.act==='rotItem'){const it=selObj();it.rot=((it.rot||0)+90)%180;commit(true);return;}
