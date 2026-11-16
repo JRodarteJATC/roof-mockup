@@ -1606,7 +1606,7 @@ function bind3d(){
     if(pts.size===2){const [a,b]=[...pts.values()];const dd=Math.hypot(a.x-b.x,a.y-b.y);if(pinch){V3.dist=clamp(V3.dist*pinch/dd,30,600);V3.dirty=true;}pinch=dd;return;}
     if(last){V3.az-=(e.clientX-last.x)*0.008;V3.el=clamp(V3.el+(e.clientY-last.y)*0.006,0.05,1.55);last={x:e.clientX,y:e.clientY};V3.dirty=true;}};
   const up=e=>{pts.delete(e.pointerId);if(pts.size<2)pinch=null;if(!pts.size){last=null;
-      if(MODE==='build'){if(V3.drag){const dg=V3.drag;V3.drag=null;if(dg.type==='piece'){const r=autoNotch(dg.obj);afterMove(dg.obj,dg.before);if(r>0)toast('Sheet cut to fit around the wall.');}bcommit(true);return;}if(tap&&e.type==='pointerup'){const dg=b3down(e,pick(e));BUI.sel=dg?{type:dg.type,id:dg.obj.id}:null;bRenderInspector();bListRefresh();bv3build();}tap=null;return;}
+      if(MODE==='build'){if(V3.drag){const dg=V3.drag;V3.drag=null;if(dg.type==='piece'){const fm=fitSheet(dg.obj);afterMove(dg.obj,dg.before);if(fm)toast(fm);}bcommit(true);return;}if(tap&&e.type==='pointerup'){const dg=b3down(e,pick(e));BUI.sel=dg?{type:dg.type,id:dg.obj.id}:null;bRenderInspector();bListRefresh();bv3build();}tap=null;return;}
       if(V3.drag){V3.drag=null;commit(true);}}};
   el.onpointerup=up;el.onpointercancel=up;
   el.onwheel=e=>{e.preventDefault();V3.dist=clamp(V3.dist*(1+Math.sign(e.deltaY)*0.08),30,600);V3.dirty=true;};
@@ -1848,7 +1848,7 @@ function moveSel(dir){const o=bSel(),d=BUI.d;if(!o)return;const isItem=BUI.sel.t
     o.z=Math.max(0,r8(o.z+st));o.hold=true;bcommit(true);const rest=restZ(o,d.pieces.filter(q=>q!==o));if(o.z<rest-0.12)toast(`Now ${frac(rest-o.z)} into the wood under it. Tap “Onto wood” to sit it on top.`);return;}
   const ax=dir==='left'||dir==='right'?'x':'y',sg=dir==='left'||dir==='back'?-1:1,st=stepFor(o,ax)*sg;
   if(isItem){o[ax]=r8(clamp(o[ax]+st,0,ax==='x'?d.base.W:d.base.L));bcommit(true);return;}
-  const before=overlapIds(o);o[ax]=r8(o[ax]+st);autoNotch(o);afterMove(o,before);bcommit(true);}
+  const before=overlapIds(o);o[ax]=r8(o[ax]+st);const fm=o.k?fitSheet(o):'';afterMove(o,before);bcommit(true);if(fm)toast(fm);}
 // ---------- adding and changing pieces ----------
 function addPiece(){const A=BUI.add,d=BUI.d;let p;
   if(A.stock==='sheet'){const w=parseLen(A.w),l=parseLen(A.l);if(!(w>0&&l>0)){toast('Type a width and a length for the sheet, like 48 and 96.');return;}
@@ -1856,8 +1856,8 @@ function addPiece(){const A=BUI.add,d=BUI.d;let p;
     p={id:uid(),k:'sh',mat:A.sheet,w:Math.min(w,l),l:Math.max(w,l),x:d.base.W/2,y:d.base.L/2,z:999,rot:0,tilt:{p:0,low:'u+'},cover:''};}
   else{const len=parseLen(A.len);if(!(len>0)){toast('Type a length, like 48 or 3′ 6″.');return;}if(len>192){toast('Lumber is sold up to 16′ (192″). Use two pieces.');return;}
     p={id:uid(),k:'lum',mat:A.stock,len:r8(len),lay:A.lay,x:d.base.W/2,y:d.base.L/2,z:999,rot:0,cut:'full',taper:null};}
-  const D=pDims(p);p.x=r8(clamp(p.x,Math.min(D.a,d.base.W/2),d.base.W-Math.min(D.a,d.base.W/2)));d.pieces.push(p);BUI.sel={type:'piece',id:p.id};const cutNow=p.k==='sh'&&autoNotch(p)>0;bcommit(true);
-  toast(cutNow?`${pName(p)} added and cut to fit around the wall. Drag it into place on the Build view.`:`${pName(p)} added in the middle. Drag it into place on the Build view.`);}
+  const D=pDims(p);p.x=r8(clamp(p.x,Math.min(D.a,d.base.W/2),d.base.W-Math.min(D.a,d.base.W/2)));d.pieces.push(p);BUI.sel={type:'piece',id:p.id};const fm=fitSheet(p);bcommit(true);
+  toast(`${pName(p)} added in the middle.${fm?' '+fm:''} Drag it into place on the Build view.`);}
 function copyPiece(id,dist){const d=BUI.d,p=d.pieces.find(q=>q.id===id);if(!p)return;const c=clone(p);c.id=uid();const D=pDims(p);
   const off=dist?dist:2*D.b+0.5;const [ux,uy]=pAx(p);c.x=r8(p.x-uy*off);c.y=r8(p.y+ux*off);if(c.k==='sh')c.z=p.z;
   d.pieces.splice(d.pieces.indexOf(p)+1,0,c);BUI.sel={type:'piece',id:c.id};bcommit(true);toast(dist?`Copied ${frac(dist)} over.`:'Copied next to it.');}
@@ -1881,6 +1881,18 @@ function setTaperSlope(p,dir){const hi=Math.max(p.taper.h0,p.taper.h1);const cur
   if(dir>0&&SLOPES[i]<=cur+1e-6)i++;else if(dir<0)i--;i=clamp(i,1,SLOPES.length-1);const s=SLOPES[i];let lo=r8(hi-p.len*s/12);
   if(lo<0.25){toast(`At ${pitchTxt(s)} this ${frac(p.len)} board would end at ${frac(Math.max(0,lo))}. Use a taller board or a shorter piece.`);return false;}
   if(p.taper.h0>=p.taper.h1){p.taper.h0=hi;p.taper.h1=lo;}else{p.taper.h1=hi;p.taper.h0=lo;}return true;}
+// a flat sheet dropped on tapered (ripped) boards tilts to their slope by itself; returns a message or ''
+function autoSlope(p){if(p.k!=='sh'||p.lay==='up')return '';const d=BUI.d;if(p.tilt&&p.tilt.p)return '';const bb=pBox(p);
+  const under=d.pieces.filter(q=>q!==p&&q.k==='lum'&&q.lay==='edge'&&q.cut==='taper'&&q.taper&&Math.abs(q.taper.h0-q.taper.h1)>0.01&&overlapBox(bb,pBox(q))&&samplePts(q,1).some(([x,y])=>pInside(p,x,y,0.1)));
+  if(!under.length)return '';
+  const dirs=under.map(q=>{const [qx,qy]=pAx(q);const s=(q.taper.h0-q.taper.h1)/q.len;return {x:qx*Math.sign(s),y:qy*Math.sign(s),pitch:Math.abs(s)*12};});
+  const a=dirs[0];if(!dirs.every(o=>o.x*a.x+o.y*a.y>0.985&&Math.abs(o.pitch-a.pitch)<0.2))return 'mixed';
+  const [ux,uy]=pAx(p);const du=a.x*ux+a.y*uy,dv=-a.x*uy+a.y*ux;const low=Math.abs(du)>=Math.abs(dv)?(du>0?'u+':'u-'):(dv>0?'v+':'v-');
+  const near=SLOPES.reduce((m,b)=>Math.abs(b-a.pitch)<Math.abs(m-a.pitch)?b:m);
+  p.tilt={p:Math.abs(near-a.pitch)<0.02?near:Math.round(a.pitch*100)/100,low};p.hold=false;
+  return `tilted to ${pitchTxt(p.tilt.p)}, low side to the ${SIDE_NAMES[sideWorld(p,low)]}, to follow the tapered boards under it`;}
+function fitSheet(p){if(!p||p.k!=='sh'||p.lay==='up')return '';const c=autoNotch(p)>0,t=autoSlope(p);const m=[];if(c)m.push('cut to fit around the wall');if(t&&t!=='mixed')m.push(t);
+  let msg=m.length?'Sheet '+m.join(' and ')+'.':'';if(t==='mixed')msg+=(msg?' ':'')+'The boards under this sheet slope different ways, so it stays flat. Cut it smaller so it sits on boards that slope the same way.';return msg;}
 function matchSlope(p){const d=BUI.d;const bb=pBox(p);const under=d.pieces.filter(q=>q!==p&&q.k==='lum'&&q.lay==='edge'&&q.cut==='taper'&&q.taper&&Math.abs(q.taper.h0-q.taper.h1)>0.01&&overlapBox(bb,pBox(q)));
   if(!under.length){toast('No tapered boards under this sheet. Cut a taper on the boards first.');return;}
   const q=under[0];const [qx,qy]=pAx(q);const s=(q.taper.h0-q.taper.h1)/q.len; // height drops along +u of q when s>0
@@ -1974,7 +1986,7 @@ function bOnControl(e){const b=e.target.closest('button');if(!b)return;const d=B
     setK(t,k,v);afterSet(obj,t,k);if(obj==='add'){bRenderLeft();return;}bcommit(true);}}
 function afterSet(obj,t,k){if(obj!=='p')return;const p=t;
   if(k==='z')p.hold=true;
-  if(p.k==='sh'&&['x','y','w','l','lay'].includes(k)){if(p.lay==='up')p.notch=[];else autoNotch(p);}
+  if(p.k==='sh'&&['x','y','w','l','lay'].includes(k)){if(p.lay==='up')p.notch=[];else{const fm=fitSheet(p);if(fm)setTimeout(()=>toast(fm),0);}}
   if(p.k==='lum'){const dd=LUMBER[p.mat].d;
     if(k==='cut'){if(p.cut==='rip')p.taper={h0:Math.min(dd,p.taper?Math.max(p.taper.h0,p.taper.h1):dd),h1:0};if(p.cut==='taper'){p.taper={h0:dd,h1:dd};setTaperSlope(p,1);}if(p.cut==='full')p.taper=null;}
     if(p.cut==='rip'&&p.taper)p.taper.h1=p.taper.h0;
@@ -2039,7 +2051,7 @@ function bBindPlan(){const svg=document.getElementById('plansvg');if(!svg)return
     else bSnapMove(down.p,pt[0]+down.off[0],pt[1]+down.off[1]);bPlanRefresh();};
   const up=e=>{BUI.dragging=false;if(!down)return;const dn=down;down=null;
     if(!dn.moved&&dn.kind==='piece'&&dn.wasSel&&dn.hits.length>1){const i=dn.hits.indexOf(dn.p);const nx=dn.hits[(i+1)%dn.hits.length];BUI.sel={type:'piece',id:nx.id};bPlanRefresh();bRenderInspector();bListRefresh();toast(`Picked ${pLabel(BUI.d,nx)} (underneath).`);return;}
-    if(dn.moved){if(dn.kind==='piece'){const r=autoNotch(dn.p);afterMove(dn.p,dn.before);if(r>0)toast('Sheet cut to fit around the wall.');}bcommit(false);}};
+    if(dn.moved){if(dn.kind==='piece'){const fm=fitSheet(dn.p);afterMove(dn.p,dn.before);if(fm)toast(fm);}bcommit(false);}};
   svg.onpointerup=up;svg.onpointercancel=up;}
 function bQuickRefresh(){const q=document.getElementById('qnudge');if(q)q.innerHTML=quickNudge();}
 function bListRefresh(){bQuickRefresh();const l=document.querySelector('#left .sec.list');if(l)l.innerHTML=`<div class="subhead">Pieces (${BUI.d.pieces.length})</div>${bListHtml()}`;}
