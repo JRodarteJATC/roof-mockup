@@ -1672,11 +1672,13 @@ function parseLen(s){s=String(s==null?'':s).trim().replace(/[″"]/g,'').replace
   let v=0;for(const p of s.replace(/(\d)-(\d)/g,'$1 $2').split(/\s+/)){if(/^\d+\/\d+$/.test(p)){const [a,b]=p.split('/');if(+b===0)return NaN;v+=a/b;}else if(/^\d*\.?\d+$/.test(p))v+=+p;else return NaN;}return ft*12+v;}
 // ---------- geometry ----------
 function lumTilt(p){return p.k==='lum'&&p.lay!=='up'&&p.tilt&&p.tilt.p?p.tilt.p:0;}
-function pDims(p){if(p.k==='sh'){const t=SHEETS[p.mat].t;if(p.lay==='up')return {a:p.w/2,b:t/2,t:p.l};return {a:p.l/2,b:p.w/2,t};}
+let GC=null;// geometry cache, only while settling (x, y, size and turn do not change then)
+function pDims(p){if(GC){let v=GC.d.get(p);if(!v){v=pDims0(p);GC.d.set(p,v);}return v;}return pDims0(p);}
+function pDims0(p){if(p.k==='sh'){const t=SHEETS[p.mat].t;if(p.lay==='up')return {a:p.w/2,b:t/2,t:p.l};return {a:p.l/2,b:p.w/2,t};}
   const d=LUMBER[p.mat].d,s=lumTilt(p),c=1/Math.sqrt(1+(s/12)**2);
   if(p.lay==='flat')return {a:p.len*c/2,b:d/2,h0:1.5/c,h1:1.5/c};if(p.lay==='up')return {a:d/2,b:0.75,h0:p.len,h1:p.len};
   const t=!s&&p.cut&&p.cut!=='full'&&p.taper?p.taper:null;return {a:p.len*c/2,b:0.75,h0:t?t.h0:d/c,h1:t?t.h1:d/c};}
-function pAx(p){const r=(p.rot||0)*Math.PI/180;return [Math.cos(r),Math.sin(r)];}
+function pAx(p){if(GC){let v=GC.a.get(p);if(!v){const r=(p.rot||0)*Math.PI/180;v=[Math.cos(r),Math.sin(r)];GC.a.set(p,v);}return v;}const r=(p.rot||0)*Math.PI/180;return [Math.cos(r),Math.sin(r)];}
 function toLocal(p,x,y){const [ux,uy]=pAx(p),dx=x-p.x,dy=y-p.y;return [dx*ux+dy*uy,-dx*uy+dy*ux];}
 function toWorld(p,u,v){const [ux,uy]=pAx(p);return [p.x+u*ux-v*uy,p.y+u*uy+v*ux];}
 function gOff(p,u,v){if(p.k==='lum'){const s=lumTilt(p);if(!s)return 0;const D=pDims(p);return p.tilt.low==='u-'?(u+D.a)*s/12:(D.a-u)*s/12;}
@@ -1738,7 +1740,8 @@ function autoNotch(p){if(p.k!=='sh'||p.lay==='up'||p.noCut)return 0;const d=BUI.
   p.l=r8(ku1-ku0);p.w=r8(kv1-kv0);p.notch=R.map(r=>[r8(r[0]-cu),r8(r[1]-cv),r8(r[2]-cu),r8(r[3]-cv)]).filter(r=>r[2]-r[0]>0.1&&r[3]-r[1]>0.1);
   return JSON.stringify(p.notch)!==before||Math.abs(ku1-ku0-2*D.a)>0.01||Math.abs(kv1-kv0-2*D.b)>0.01?1:0;}
 function pTopMax(p){return Math.max(...pCorners(p).map(([u,v])=>topL(p,u,v)));}
-function samplePts(p,step){const D=pDims(p),sh=0.06;const nu=clamp(Math.ceil(2*D.a/step),1,64),nv=clamp(Math.ceil(2*D.b/step),1,40);const out=[];
+function samplePts(p,step){if(GC){let m=GC.s.get(p);if(!m){m={};GC.s.set(p,m);}return m[step]||(m[step]=samplePts0(p,step));}return samplePts0(p,step);}
+function samplePts0(p,step){const D=pDims(p),sh=0.06;const nu=clamp(Math.ceil(2*D.a/step),1,64),nv=clamp(Math.ceil(2*D.b/step),1,40);const out=[];
   for(let i=0;i<=nu;i++)for(let j=0;j<=nv;j++){const u=-D.a+sh+(2*D.a-2*sh)*i/nu,v=-D.b+sh+(2*D.b-2*sh)*j/nv;if(inNotchL(p,u,v,-0.06))continue;out.push(toWorld(p,u,v));}return out;}
 function overlapBox(a,b){return a.x0<b.x1-0.05&&a.x1>b.x0+0.05&&a.y0<b.y1-0.05&&a.y1>b.y0+0.05;}
 // the height the piece's low edge comes to rest at, sitting on whatever is under it
@@ -1746,8 +1749,30 @@ function restZ(p,others){const bb=pBox(p);const cand=others.filter(q=>q!==p&&ove
   const z0=p.z;p.z=0;let z=0;const test=(x,y)=>{if(!pInside(p,x,y,0.05))return;const [pu,pv]=toLocal(p,x,y);const g=gOff(p,pu,pv);
     cand.forEach(q=>{if(!pInside(q,x,y,0.05))return;const [qu,qv]=toLocal(q,x,y);const t=topL(q,qu,qv)-g;if(t>z)z=t;});};
   samplePts(p,1.5).forEach(([x,y])=>test(x,y));cand.forEach(q=>samplePts(q,1.5).forEach(([x,y])=>test(x,y)));p.z=z0;return z;}
-function settleAll(d){const order=d.pieces;const done=[];
-  order.forEach(p=>{if(!p.hold)p.z=Math.round(restZ(p,done)*1000)/1000;done.push(p);});}
+// the rest height of p on each piece in cand (one pass over the sample points)
+function restEach(p,cand){const z0=p.z;p.z=0;const zs=cand.map(()=>0);const test=(x,y)=>{if(!pInside(p,x,y,0.05))return;const [pu,pv]=toLocal(p,x,y);const g=gOff(p,pu,pv);
+    cand.forEach((q,i)=>{if(!pInside(q,x,y,0.05))return;const [qu,qv]=toLocal(q,x,y);const t=topL(q,qu,qv)-g;if(t>zs[i])zs[i]=t;});};
+  samplePts(p,1.5).forEach(([x,y])=>test(x,y));cand.forEach(q=>samplePts(q,1.5).forEach(([x,y])=>test(x,y)));p.z=z0;return zs;}
+function clashPts0(p,step){const D=pDims(p),sh=0.1;const nu=clamp(Math.ceil(2*D.a/step),1,48),nv=clamp(Math.ceil(2*D.b/step),1,32);const out=[];
+  for(let i=0;i<=nu;i++)for(let j=0;j<=nv;j++){const u=-D.a+sh+(2*D.a-2*sh)*i/nu,v=-D.b+sh+(2*D.b-2*sh)*j/nv;if(inNotchL(p,u,v,-0.1))continue;out.push(toWorld(p,u,v));}return out;}
+let SPC=null;const spOf=p=>{if(!SPC)return clashPts0(p,1.5);let v=SPC.get(p);if(!v){v=clashPts0(p,1.5);SPC.set(p,v);}return v;};
+// do p and q take up the same space (more than a touch)?
+function clashAny(p,q){if(!overlapBox(pBox(p),pBox(q)))return false;const [b0,t0]=pZr(p),[b1,t1]=pZr(q);if(b0>=t1-0.13||b1>=t0-0.13)return false;
+  for(const pts of [spOf(p),spOf(q)])for(const [x,y] of pts){if(!pInside(p,x,y,0.08)||!pInside(q,x,y,0.08))continue;const [pu,pv]=toLocal(p,x,y),[qu,qv]=toLocal(q,x,y);
+    if(botL(p,pu,pv)<topL(q,qu,qv)-0.13&&botL(q,qu,qv)<topL(p,pu,pv)-0.13)return true;}return false;}
+// where p comes to rest: the lowest spot it fits (on the base or on a piece under it) without running into wood that is already
+// in place, so a board slid between two others drops into the gap and nothing around it moves. "Stack order" pieces sit on top.
+function fitZ(p,done,blockers){const bb=pBox(p);const cand=done.filter(q=>q!==p&&overlapBox(bb,pBox(q)));const each=restEach(p,cand);const top=Math.max(0,...each);
+  if(p.stacked||!cand.length&&p._fromZ==null)return top;
+  const blk=blockers.filter(q=>q!==p&&overlapBox(bb,pBox(q)));if(!blk.length)return top;
+  const lv=[...new Set([0,...each.map(z=>Math.round(z*1000)/1000)])].filter(L=>L<=top+1e-6).sort((a,b)=>a-b);
+  const z0=p.z,ok=L=>{p.z=L;return !blk.some(q=>clashAny(p,q));};let res=null;
+  if(p._fromZ!=null)for(const L of lv.filter(L=>L<=p._fromZ+0.01).reverse())if(ok(L)){res=L;break;}
+  if(res==null)for(const L of lv)if(ok(L)){res=L;break;}
+  p.z=z0;return res==null?top:res;}
+function settleAll(d){SPC=new Map();GC={d:new Map(),a:new Map(),s:new Map()};try{settleAll0(d);}finally{SPC=null;GC=null;}}
+function settleAll0(d){const order=d.pieces;const done=[],inDone=new Set();const held=order.filter(p=>p.hold);
+  order.forEach(p=>{if(!p.hold)p.z=Math.round(fitZ(p,done,done.concat(held.filter(h=>!inDone.has(h))))*1000)/1000;delete p._fromZ;done.push(p);inDone.add(p);});}
 function surfaceAt(d,x,y){let best=null,bz=0;d.pieces.forEach(p=>{if(!pInside(p,x,y,0))return;const [u,v]=toLocal(p,x,y);const t=topL(p,u,v);if(t>=bz-1e-6){bz=t;best=p;}});
   const cov=best&&best.k==='sh'&&best.cover?best.cover:'';return {z:bz+(cov?coverT({mat:cov}):0),p:best,cover:cov};}
 function pitchOf(p){if(p.k==='sh')return p.lay==='up'?0:(p.tilt&&p.tilt.p||0);if(lumTilt(p))return lumTilt(p);if(p.lay!=='edge'||!p.cut||p.cut==='full'||!p.taper)return 0;return Math.abs(p.taper.h0-p.taper.h1)/p.len*12;}
@@ -1828,13 +1853,13 @@ function touchesAny(d,p){const [b0,t0]=pZr(p);const bb=pBox(p);const g={x0:bb.x0
   return d.pieces.some(q=>{if(q===p)return false;const qb=pBox(q);if(!(g.x0<qb.x1&&g.x1>qb.x0&&g.y0<qb.y1&&g.y1>qb.y0))return false;const [b1,t1]=pZr(q);return b1<=t0+0.2&&t1>=b0-0.2;});}
 function overlapIds(p){const bb=pBox(p);return BUI.d.pieces.filter(q=>q!==p&&overlapBox(bb,pBox(q))).map(q=>q.id);}
 // after a piece is slid to a new spot: if it was under something and still is, it stays under; otherwise it lands on top of what is there now
-function afterMove(p,before){const d=BUI.d;if(p.hold)return;const i=d.pieces.indexOf(p);const now=overlapIds(p);
+function afterMove(p,before){const d=BUI.d;if(p.hold)return;delete p.stacked;const i=d.pieces.indexOf(p);const now=overlapIds(p);
   const stillUnder=now.some(id=>before.includes(id)&&d.pieces.findIndex(q=>q.id===id)>i);
   if(!stillUnder){d.pieces.splice(i,1);d.pieces.push(p);}}
 function moveLayer(p,to){const d=BUI.d,i=d.pieces.indexOf(p);d.pieces.splice(i,1);
   if(to==='top')d.pieces.push(p);else if(to==='bottom')d.pieces.unshift(p);
   else{const ov=overlapIds(p);let j=i;if(to==='up'){j=d.pieces.findIndex((q,k)=>k>=i&&ov.includes(q.id));j=j<0?d.pieces.length:j+1;}else{let k=i-1;while(k>=0&&!ov.includes(d.pieces[k].id))k--;j=Math.max(0,k);}d.pieces.splice(j,0,p);}
-  p.hold=false;}
+  p.hold=false;if(to==='top'||to==='up')p.stacked=true;else delete p.stacked;}
 const STEPS=[['eighth','1/8″'],['inch','1″'],['board','1 board']];
 function stepFor(o,axis){const st=BUI.step||'inch';if(st==='eighth')return 0.125;if(st==='inch')return 1;
   if(BUI.sel&&BUI.sel.type==='item')return 1.5;const bb=pBox(o);if(axis==='x')return r8(bb.x1-bb.x0);if(axis==='y')return r8(bb.y1-bb.y0);
@@ -1991,12 +2016,12 @@ function bOnControl(e){const b=e.target.closest('button');if(!b)return;const d=B
   if(b.dataset.bact){const a=b.dataset.bact,p=bSel();
     if(a==='addPiece')return addPiece();if(a==='del')return removeSel();
     if(a==='rot'){rotPiece(p,+b.dataset.deg);autoNotch(p);bcommit(true);return;}
-    if(a==='drop'){p.hold=false;bcommit(true);return;}
+    if(a==='drop'){p._fromZ=p.z;p.hold=false;bcommit(true);return;}
     if(a==='mv'){moveSel(b.dataset.dir);return;}
     if(a==='nudge'){const dz=+b.dataset.dz;const d=BUI.d;const rest=restZ(p,d.pieces.slice(0,d.pieces.indexOf(p)));let nz=Math.round((p.z+dz)*8)/8;
-      if(dz<0&&nz<=rest+0.01){nz=rest;if(Math.abs(p.z-rest)<0.01){toast('It is already sitting on the wood under it.');return;}p.z=nz;p.hold=false;bcommit(true);toast('Down on the wood under it.');return;}
+      if(dz<0&&nz<=rest+0.01){nz=rest;if(Math.abs(p.z-rest)<0.01){toast('It is already sitting on the wood under it.');return;}p._fromZ=p.z;p.hold=false;bcommit(true);toast('Down on the wood under it.');return;}
       p.z=r8(Math.max(0,nz));p.hold=true;bcommit(true);return;}
-    if(a==='sitdown'){if(BUI.sel.type==='item'){p.dz=0;bcommit(true);toast('Sitting on the roof again.');return;}p.hold=false;bcommit(true);toast('Down on the wood under it.');return;}
+    if(a==='sitdown'){if(BUI.sel.type==='item'){p.dz=0;bcommit(true);toast('Sitting on the roof again.');return;}p._fromZ=p.z;p.hold=false;bcommit(true);toast('Down on the wood under it.');return;}
     if(a==='inudge'){const dz=+b.dataset.dz;p.dz=dz===0?0:r8(clamp((p.dz||0)+dz,-6,24));bcommit(true);return;}
     if(a==='layer'){moveLayer(p,b.dataset.to);bcommit(true);toast({top:'Moved to the top of the stack.',bottom:'Moved to the bottom of the stack.',up:'Moved up one layer.',down:'Moved down one layer.'}[b.dataset.to]);return;}
     if(a==='copy'){copyPiece(p.id,+b.dataset.dist||0);return;}
@@ -2099,7 +2124,7 @@ function bRenderView(){const v=document.getElementById('view'),d=BUI.d,M=BUI.M;l
   if(!BTABS.some(t=>t[0]===UI.tab))UI.tab='plan';
   if(UI.tab==='plan'){h+=`<div class="toolbar"><span class="seg" role="group" aria-label="Tool">${[['select','Select / move'],['multi','Select several'],['item','Add detail'],['erase','Erase']].map(([k,l])=>`<button type="button" data-btool="${k}" class="${BUI.tool===k?'on':''}">${l}</button>`).join('')}</span><span class="seg"><button type="button" data-bhide="1" class="${BUI.hideSheets?'on':''}">Hide sheets</button></span></div>`;
     if(BUI.tool==='item')h+=`<div class="palette">${Object.entries(ITEM_KINDS).map(([k,v])=>`<button type="button" data-bkind="${k}" class="${BUI.itemKind===k?'on':''}">${esc(v.n)}</button>`).join('')}</div>`;
-    h+=`<div class="viewbar"><span class="hint">${BUI.tool==='item'?`Tap where the ${ITEM_KINDS[BUI.itemKind].n.toLowerCase()} goes.`:BUI.tool==='erase'?'Tap a piece or detail to remove it. Undo brings it back.':BUI.tool==='multi'?'Tap pieces and details to add them to the group (tap again to take one out). Drag any of them to move the whole group, or use the arrows on the left.':'Top view. Drag a piece to move it: it snaps to the grid and to the edges of other pieces, then settles onto whatever is under it. Tap the same spot again to pick the piece underneath.'}</span></div>`;
+    h+=`<div class="viewbar"><span class="hint">${BUI.tool==='item'?`Tap where the ${ITEM_KINDS[BUI.itemKind].n.toLowerCase()} goes.`:BUI.tool==='erase'?'Tap a piece or detail to remove it. Undo brings it back.':BUI.tool==='multi'?'Tap pieces and details to add them to the group (tap again to take one out). Drag any of them to move the whole group, or use the arrows on the left.':'Top view. Drag a piece to move it: it snaps to the grid and to the edges of other pieces, then drops into the gap or onto the wood under it. Tap the same spot again to pick the piece underneath.'}</span></div>`;
     h+=`<div class="svgwrap plan" id="planwrap">${bPlanSVG({})}</div><div class="legend"><span><i style="background:${PIECE_COL.lum}"></i>Board</span><span><i style="background:${PIECE_COL.sh}"></i>Sheet</span><span><i class="dash"></i>Arrow points downhill</span></div>`;}
   else if(UI.tab==='3d'){h+=`<div class="toolbar"><span class="seg"><button type="button" id="v3spin" class="${V3.spin?'on':''}">360° spin</button><button type="button" id="v3move" class="${V3.move?'on':''}">Move pieces</button><button type="button" data-bhide="1" class="${BUI.hideSheets?'on':''}">Hide sheets</button></span><span class="seg"><button type="button" data-v3="iso">3D</button><button type="button" data-v3="top">Top</button><button type="button" data-v3="front">Front</button><button type="button" data-v3="side">Side</button></span></div><div class="svgwrap" id="v3wrap"></div><p class="hint">${V3.move?'Drag a piece or detail to slide it. It settles onto the wood under it when you let go. Turn off “Move pieces” to orbit.':'Tap a piece to select it. Drag to orbit, pinch or scroll to zoom.'}</p>`;}
   else if(UI.tab==='cut'){h+=`<p class="hint">Every piece to cut, grouped when they are the same. Lengths are to the nearest 1/8″.</p><h3>Lumber</h3>`+table(['Pieces','Qty','Length','Ft-in','Lumber','Cut'],cutRows(M),[1,2,3])+`<h3>Sheets</h3>`+table(['Pieces','Qty','Cut size','Sheet','Notes'],sheetRows(M),[1,2]);
