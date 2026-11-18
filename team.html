@@ -1861,7 +1861,7 @@ function bSave(){try{localStorage.setItem(bKey(),JSON.stringify(BUI.d));}catch(e
 function bRebuild(){BUI.M=buildBuildModel(BUI.d);}
 function bInit(){BUI.d=bLoad()||blankBuild();settleAll(BUI.d);bRebuild();BUI.hist=[];BUI.fut=[];BUI.last=JSON.stringify(BUI.d);BUI.sel=null;}
 function bSel(){const s=BUI.sel;if(!s)return null;return s.type==='piece'?BUI.d.pieces.find(p=>p.id===s.id):BUI.d.items.find(i=>i.id===s.id);}
-function bcommit(full){const d=BUI.d;d.items.forEach(it=>{it.x=clamp(it.x,0,d.base.W);it.y=clamp(it.y,0,d.base.L);});
+function bcommit(full){if(BUI.batch){BUI.batchHit=true;return;}const d=BUI.d;d.items.forEach(it=>{it.x=clamp(it.x,0,d.base.W);it.y=clamp(it.y,0,d.base.L);});
   settleAll(d);if(BUI.sel&&!bSel())BUI.sel=null;bRebuild();bSave();if(HOOKS.afterCommit)HOOKS.afterCommit();
   const j=JSON.stringify(d);if(j!==BUI.last){BUI.hist.push(BUI.last);if(BUI.hist.length>80)BUI.hist.shift();BUI.fut=[];BUI.last=j;}syncUndo();
   if(full!==false)render();else{renderHeader();renderTabs();if(UI.tab==='plan')bPlanRefresh();renderLeft();}}
@@ -1988,7 +1988,7 @@ function bRenderInspector(){const el=document.getElementById('inspector');if(!el
       ${n?`<div class="subhead">Move together</div><div class="row"><span class="lab">Each tap</span><span class="seg">${[[0.125,'1/8″'],[1,'1″'],[3.5,'3-1/2″'],[12,'12″']].map(([v,t])=>`<button type="button" data-bmstep="${v}" class="${st===v?'on':''}">${t}</button>`).join('')}</span></div>
       <div class="btnrow"><button type="button" class="btn light" data-bmm="-1,0">← Left</button><button type="button" class="btn light" data-bmm="1,0">Right →</button><button type="button" class="btn light" data-bmm="0,-1">↑ Back</button><button type="button" class="btn light" data-bmm="0,1">↓ Front</button></div>
       <div class="btnrow"><button type="button" class="btn light" data-bmrot="90">Turn the group 90°</button></div>
-      <div class="btnrow"><button type="button" class="btn danger" data-bmdel="1">Delete ${n}</button></div>`:''}</div>`;return;}
+      <div class="btnrow"><button type="button" class="btn danger" data-bmdel="1">Delete ${n}</button></div>`:''}</div>`+(n?mSettingsHtml():'');return;}
   if(!o){el.innerHTML=`<div class="insp empty"><b>Nothing selected</b><span class="hint">Tap a piece on the Build view or in the list below. Tap the same spot again to reach the piece underneath.</span></div>`;return;}
   let h='<div class="insp">';
   if(BUI.sel.type==='item'){const it=o;h+=`<div class="insphead"><b>${ITEM_KINDS[it.kind].n}</b><span class="hint">${(()=>{const S=surfaceAt(d,it.x,it.y);return S.p?`on ${esc(pLabel(d,S.p))}`:'not on any wood';})()}</span></div>`;
@@ -2017,7 +2017,7 @@ function bRenderInspector(){const el=document.getElementById('inspector');if(!el
   if(TEACH.allowCopy)h+=`<div class="subhead">Copy</div><div class="btnrow"><button type="button" class="btn light" data-bact="copy">Copy beside it</button><button type="button" class="btn light" data-bact="copy" data-dist="12">12″ o.c.</button><button type="button" class="btn light" data-bact="copy" data-dist="16">16″ o.c.</button><button type="button" class="btn light" data-bact="copy" data-dist="24">24″ o.c.</button></div>`;
   if(TEACH.allowMirror)h+=`<div class="subhead">Mirror</div><div class="btnrow"><button type="button" class="btn light" data-bact="mirror" data-m="rot180">Opposite corner</button><button type="button" class="btn light" data-bact="mirror" data-m="lr">Left ↔ right</button><button type="button" class="btn light" data-bact="mirror" data-m="fb">Back ↔ front</button></div><p class="hint">Adds a mirrored copy on the other side.</p>`;
   h+=`<div class="btnrow"><button type="button" class="btn danger" data-bact="del">Delete</button></div></div>`;el.innerHTML=h;}
-function bOnControl(e){const b=e.target.closest('button');if(!b)return;const d=BUI.d;{const p0=bSel();if(p0&&p0.k==='lum'&&!p0.tilt)p0.tilt={p:0,low:'u+'};}
+function bOnControl(e){const b=e.target.closest('button');if(!b)return;if(mRoute(e,bOnControl))return;const d=BUI.d;{const p0=bSel();if(p0&&p0.k==='lum'&&!p0.tilt)p0.tilt={p:0,low:'u+'};}
   if(b.dataset.bstepsize){BUI.step=b.dataset.bstepsize;bRenderInspector();bQuickRefresh();return;}
   if(b.dataset.bmall){BUI.multi=d.pieces.map(p=>({type:'piece',id:p.id})).concat(d.items.map(i=>({type:'item',id:i.id})));bRenderInspector();bPlanRefresh();bListRefresh();return;}
   if(b.dataset.bmclear){BUI.multi=[];bRenderInspector();bPlanRefresh();bListRefresh();return;}
@@ -2056,6 +2056,47 @@ function bOnControl(e){const b=e.target.closest('button');if(!b)return;const d=B
     if(b.dataset.list){const i=SLOPES.findIndex(x=>x>=v-1e-9);v=SLOPES[clamp((i<0?SLOPES.length-1:i)+(dl>0?1:-1),0,SLOPES.length-1)];}
     else v=clamp(Math.round((v+dl)*8)/8,+b.dataset.min,+b.dataset.max);
     setK(t,k,v);afterSet(obj,t,k);if(obj==='add'){bRenderLeft();return;}bcommit(true);}}
+// ---------- settings for every picked piece (Select several) ----------
+function mPieces(kind){const d=BUI.d,ids=(BUI.multi||[]).filter(m=>m.type==='piece').map(m=>m.id);return d.pieces.filter(p=>ids.includes(p.id)&&(!kind||p.k===kind));}
+function mSettingsHtml(){const d=BUI.d,sel0=BUI.sel;let h='';
+  for(const kind of ['lum','sh']){const ps=mPieces(kind);if(!ps.length)continue;const p=ps[0];BUI.sel={type:'piece',id:p.id};if(p.k==='lum'&&!p.tilt)p.tilt={p:0,low:'u+'};
+    try{const nm=kind==='lum'?(ps.length>1?'boards':'board'):(ps.length>1?'sheets':'sheet');
+      h+=`<div class="insp" data-mk="${kind}"><div class="insphead"><b>Change all ${ps.length} ${nm}</b><span class="hint">Shown: ${esc(pLabel(d,p))}. − and + change each one by that much; picking a choice or typing a number sets them all the same. Settings that don't fit a piece are skipped for it.</span></div>`;
+      if(p.k==='lum')h+=seg('p','mat','Lumber',[['2x4','2×4'],['2x6','2×6'],['2x8','2×8']])+lenField('p','len','Length')+seg('p','lay','How it sits',[['flat','Flat'],['edge','On edge'],['up','Standing']]);
+      else h+=select('p','mat','Sheet',Object.entries(SHEETS).map(([k,v])=>[k,v.n]))+lenField('p','w',p.lay==='up'?'Cut width (along the wall)':'Cut width')+lenField('p','l',p.lay==='up'?'Cut height':'Cut length')+seg('p','lay','How it sits',[['flat','Flat'],['up','Standing (wall)']],p.lay||'flat');
+      h+=`<div class="row"><span class="lab">Turn each</span><span class="seg"><button type="button" data-bact="rot" data-deg="-15">↺ 15°</button><button type="button" data-bact="rot" data-deg="90">90°</button><button type="button" data-bact="rot" data-deg="15">↻ 15°</button></span></div>`;
+      if(p.k==='lum'&&p.lay!=='up'&&(!p.cut||p.cut==='full')){h+=`<div class="subhead">Slope (rafters, sloped plates)</div>`+stepper('p','tilt.p','Slope',1,0,12,v=>pitchTxt(v||0),true);
+        if(lumTilt(p))h+=seg('p','tilt.low','Low end',['u-','u+'].map(sd=>[sd,{L:'Left',R:'Right',B:'Back',F:'Front'}[sideWorld(p,sd)]]));}
+      if(p.k==='lum'&&p.lay==='edge'&&!lumTilt(p)){const dd=LUMBER[p.mat].d;h+=`<div class="subhead">Cut</div>`+seg('p','cut','Cut',[['full','Full'],['rip','Rip'],['taper','Taper']],p.cut||'full');
+        if(p.cut==='rip')h+=stepper('p','taper.h0','Height after rip',0.125,0.5,dd);
+        if(p.cut==='taper'){h+=`<div class="row"><span class="lab">Slope</span><span class="stepper"><button type="button" data-bact="slope" data-dir="-1" aria-label="Less slope">−</button><span>${pitchTxt(r8(pitchOf(p)*8)/8)}</span><button type="button" data-bact="slope" data-dir="1" aria-label="More slope">+</button></span></div>`;
+          h+=stepper('p',p.taper.h0>=p.taper.h1?'taper.h0':'taper.h1','High end',0.125,0.5,dd)+stepper('p',p.taper.h0>=p.taper.h1?'taper.h1':'taper.h0','Low end',0.125,0.25,dd);
+          h+=`<div class="btnrow"><button type="button" class="btn light" data-bact="flip">Flip high and low ends</button></div>`;}}
+      if(p.k==='sh'&&p.lay!=='up'){h+=`<div class="subhead">Cut to fit walls</div><div class="btnrow"><button type="button" class="btn light" data-bact="cutfit">Cut around walls</button><button type="button" class="btn light" data-bact="uncut">Full sheets, no cuts</button></div>`;
+        h+=`<div class="subhead">Slope and roofing</div>`+stepper('p','tilt.p','Slope',1,0,12,v=>pitchTxt(v),true);
+        if(p.tilt.p)h+=seg('p','tilt.low','Low side',['u-','u+','v-','v+'].map(sd=>[sd,{L:'Left',R:'Right',B:'Back',F:'Front'}[sideWorld(p,sd)]]));
+        h+=`<div class="btnrow"><button type="button" class="btn light" data-bact="match">Match the slope of the wood under each</button></div>`;
+        h+=select('p','cover','Roofing on top',[['','None']].concat(MAT_ORDER.map(k=>[k,MATS[k].n])));}
+      h+=`</div>`;}finally{BUI.sel=sel0;}}
+  return h;}
+// does this setting make sense for piece p?
+function mFits(p,key,act){if(p.k!=='lum')return !(p.lay==='up'&&['tilt.p','tilt.low','match','cutfit','uncut'].includes(key||act));
+  if(['cut'].includes(key))return p.lay==='edge'&&!lumTilt(p);
+  if(['taper.h0','taper.h1'].includes(key)||['slope','flip'].includes(act))return p.lay==='edge'&&!lumTilt(p)&&p.taper&&(key?p.cut==='rip'||p.cut==='taper':p.cut==='taper');
+  if(['tilt.p','tilt.low'].includes(key))return p.lay!=='up'&&(!p.cut||p.cut==='full');return true;}
+function mRoute(e,fn){if(BUI.tool!=='multi'||BUI.batch||!e.target.closest)return false;const box=e.target.closest('[data-mk]');if(!box)return false;
+  const kind=box.dataset.mk,ps=mPieces(kind);if(!ps.length)return true;const el=e.target.closest('button')||e.target;const ds=el.dataset;
+  const key=ds.set||ds.step||ds.bnum||ds.sel||ds.blen||null,act=ds.bact||null;const keyAttr=ds.set!=null?'set':ds.step!=null?'step':ds.bnum!=null?'bnum':null;
+  const rep=ps[0];let repSide=null,repRole=null;
+  if(key==='tilt.low'&&ds.v)repSide=sideWorld(rep,JSON.parse(ds.v));
+  if((key==='taper.h0'||key==='taper.h1')&&rep.taper&&rep.cut==='taper')repRole=((key==='taper.h0')===(rep.taper.h0>=rep.taper.h1))?'hi':'lo';
+  const keep={v:ds.v,k:keyAttr?ds[keyAttr]:null};const sel0=BUI.sel;let n=0,skip=0;BUI.batch=true;BUI.batchHit=false;
+  try{for(const p of ps){if(!mFits(p,key,act)){skip++;continue;}if(p.k==='lum'&&!p.tilt)p.tilt={p:0,low:'u+'};
+      if(repSide){const sides=p.k==='lum'?['u-','u+']:['u-','u+','v-','v+'];const sd=sides.find(x=>sideWorld(p,x)===repSide);if(!sd){skip++;continue;}ds.v=JSON.stringify(sd);}
+      if(repRole&&keyAttr&&p.taper&&p.cut==='taper'){const hiK=p.taper.h0>=p.taper.h1?'taper.h0':'taper.h1',loK=hiK==='taper.h0'?'taper.h1':'taper.h0';ds[keyAttr]=repRole==='hi'?hiK:loK;}
+      BUI.sel={type:'piece',id:p.id};fn(e);n++;if(keep.v!=null)ds.v=keep.v;if(keyAttr)ds[keyAttr]=keep.k;}}
+  finally{BUI.batch=false;BUI.sel=sel0;if(keep.v!=null)ds.v=keep.v;if(keyAttr)ds[keyAttr]=keep.k;}
+  bcommit(true);toast(`Changed ${n} ${n===1?'piece':'pieces'}${skip?`; ${skip} skipped (that setting doesn't fit ${skip===1?'it':'them'})`:''}.`);return true;}
 function afterSet(obj,t,k){if(obj!=='p')return;const p=t;
   if(k==='z')p.hold=true;
   if(p.k==='sh'&&['x','y','w','l','lay'].includes(k)){if(p.lay==='up')p.notch=[];else{const fm=fitSheet(p);if(fm)setTimeout(()=>toast(fm),0);}}
@@ -2067,13 +2108,13 @@ function afterSet(obj,t,k){if(obj!=='p')return;const p=t;
     if(k==='lay'&&p.lay!=='edge'){p.cut='full';p.taper=null;}}
   if(p.k==='lum'&&k==='tilt.p'){if(!p.tilt)p.tilt={p:0,low:'u+'};if(p.tilt.p){p.cut='full';p.taper=null;}}
   if(p.k==='sh'){if(k==='w'||k==='l'){p.w=clamp(p.w,1,96);p.l=clamp(p.l,1,96);if(Math.min(p.w,p.l)>48){if(k==='w')p.w=48;else p.l=48;toast('A sheet is 48″ × 96″. One side has to be 48″ or less.');}}if(k==='tilt.p')p.hold=false;if(!p.tilt)p.tilt={p:0,low:'u+'};}}
-function bOnSelect(e){const s=e.target;if(!s.dataset.sel)return;const t=target(s.dataset.obj);setK(t,s.dataset.sel,JSON.parse(s.value));if(s.dataset.obj==='add'){bRenderLeft();return;}
+function bOnSelect(e){const s=e.target;if(!s.dataset.sel)return;if(mRoute(e,bOnSelect))return;const t=target(s.dataset.obj);setK(t,s.dataset.sel,JSON.parse(s.value));if(s.dataset.obj==='add'){bRenderLeft();return;}
   if(s.dataset.sel==='cover'&&t.cover&&(t.tilt&&t.tilt.p||0)<MATS[t.cover].min)toast(`${MATS[t.cover].n} needs at least ${pitchTxt(MATS[t.cover].min)}.`);bcommit(true);}
 function bOnInput(e){const i=e.target;if(i.dataset.text){setK(target(i.dataset.obj),i.dataset.text,i.value.slice(0,80));bSave();renderHeader();}}
 function parseNum(str,i){str=String(str).trim();if(/^flat$/i.test(str))return 0;if(i.dataset.list){const m=str.replace(/\s/g,'').match(/^([\d.\/ -]+?)(?::12|\/12|in12)?$/);const v=m?parseLen(m[1]):NaN;return v;}
   if(i.dataset.bnum==='sc'){const v=parseFloat(str.replace('%',''));return isNaN(v)?NaN:(v>5?v/100:v);}
   const neg=/^-/.test(str);const v=parseLen(str.replace(/^-/,''));return neg?-v:v;}
-function bOnChange(e){const i=e.target;
+function bOnChange(e){const i=e.target;if(mRoute(e,bOnChange))return;
   if(i.dataset.bnum){const obj=i.dataset.obj,t=target(obj),k=i.dataset.bnum;let v=parseNum(i.value,i);if(isNaN(v)){toast('Type a number, like 12, 3 1/2 or 1/4.');bRenderInspector();return;}
     v=clamp(Math.round(v*1000)/1000,+i.dataset.min,+i.dataset.max);if(k!=='sc'&&!i.dataset.list)v=Math.round(v*8)/8;setK(t,k,v);afterSet(obj,t,k);if(obj==='add'){bRenderLeft();return;}bcommit(true);return;}
   if(!i.dataset.blen)return;const obj=i.dataset.obj,t=target(obj);const v=parseLen(i.value);
